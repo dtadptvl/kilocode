@@ -7,6 +7,7 @@ import { ProviderV2 } from "@opencode-ai/core/provider"
 import { ModelV2 } from "@opencode-ai/core/model"
 import { RecallSearch } from "../../src/kilocode/session/recall-search"
 import {
+  bridgeQueries,
   closeSeed,
   fuse,
   profile,
@@ -82,6 +83,63 @@ function trace(messages: MessageV2.WithParts[]): TracePart[] {
     ),
   ) as TracePart[]
 }
+
+it.instance(
+  "A/B: one relational bridge hop retrieves a causally linked entity from another session",
+  () =>
+    Effect.gen(function* () {
+      yield* seedProject
+      const sessions = yield* Session.Service
+      const first = yield* sessions.create({ title: "Auth symptom" })
+      const a1 = yield* add(first.id, "user", "Investigate refreshToken() in src/auth/token.ts")
+      yield* add(
+        first.id,
+        "assistant",
+        "refreshToken() fails because AuthSessionManager returns ERR_STALE_CREDENTIAL",
+        { parentID: a1.messageID },
+      )
+      const second = yield* sessions.create({ title: "Credential root cause" })
+      const b1 = yield* add(second.id, "user", "Investigate ERR_STALE_CREDENTIAL")
+      const root = yield* add(
+        second.id,
+        "assistant",
+        "ERR_STALE_CREDENTIAL is emitted when cached credentials survive session rotation",
+        { parentID: b1.messageID },
+      )
+
+      const query = "Why did refreshToken() fail in src/auth/token.ts?"
+      const p = profile(query)
+      const primary = yield* Effect.forEach(
+        retrievalQueries(p),
+        (subquery) =>
+          RecallSearch.search({
+            query: subquery,
+            projectID: String(Instance.project.id),
+            directories: [Instance.worktree],
+            limit: 8,
+          }).pipe(Effect.map((result) => ({ query: subquery, sessions: result.results }))),
+        { concurrency: 1 },
+      )
+      let seeds = fuse({ profile: p, results: primary, limit: 6 })
+      const bridges = bridgeQueries({ profile: p, seeds })
+      const bridged = yield* Effect.forEach(
+        bridges,
+        (subquery) =>
+          RecallSearch.search({
+            query: subquery,
+            projectID: String(Instance.project.id),
+            directories: [Instance.worktree],
+            limit: 6,
+          }).pipe(Effect.map((result) => ({ query: subquery, sessions: result.results }))),
+        { concurrency: 1 },
+      )
+      seeds = fuse({ profile: p, results: [...primary, ...bridged], limit: 8 })
+
+      expect(bridges.length).toBeLessThanOrEqual(2)
+      expect(seeds.some((seed) => seed.partID === root.partID)).toBe(true)
+    }),
+  { git: true },
+)
 
 it.instance(
   "A/B: multi-query fusion plus temporal closure improves source-part coverage over flat recall",
