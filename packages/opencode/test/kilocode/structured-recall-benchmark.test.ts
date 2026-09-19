@@ -2,7 +2,6 @@ import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { SessionProjector } from "@opencode-ai/core/session/projector"
 import { expect } from "bun:test"
 import { Effect } from "effect"
-import { Database } from "@opencode-ai/core/database/database"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 import { ModelV2 } from "@opencode-ai/core/model"
 import { RecallSearch } from "../../src/kilocode/session/recall-search"
@@ -23,7 +22,7 @@ import { testEffect } from "../lib/effect"
 
 type Stored<T> = T extends unknown ? Omit<T, "id" | "sessionID" | "messageID"> : never
 
-const it = testEffect(LayerNode.compile(LayerNode.group([Session.node, SessionProjector.node, Database.node])))
+const it = testEffect(LayerNode.compile(LayerNode.group([Session.node, SessionProjector.node])))
 
 const add = Effect.fn("StructuredRecallBenchmark.add")(function* (
   sessionID: SessionID,
