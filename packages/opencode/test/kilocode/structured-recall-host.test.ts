@@ -86,6 +86,41 @@ function enabled<A, E, R>(effect: Effect.Effect<A, E, R>) {
 }
 
 it.instance(
+  "enables recall from config without requiring the environment flag",
+  () =>
+    Effect.gen(function* () {
+      yield* seedProject
+      delete process.env.KILO_EXPERIMENTAL_STRUCTURED_RECALL
+      const sessions = yield* Session.Service
+      const database = yield* Database.Service
+      const historical = yield* sessions.create({ title: "Historical config flag" })
+      yield* add(historical.id, "assistant", {
+        type: "text",
+        text: "configFlagNeedle() was fixed in src/config/flag.ts",
+      })
+      const current = yield* sessions.create({ title: "Current" })
+      const turn = yield* add(current.id, "user", { type: "text", text: "Recall configFlagNeedle()" })
+      const msgs = yield* sessions.messages({ sessionID: current.id })
+      const currentMsg = msgs.find((message) => message.info.id === turn.messageID)!
+
+      expect(
+        yield* KiloStructuredRecall.inject({
+          msgs,
+          sessionID: current.id,
+          currentMessageID: turn.messageID,
+          projectID: String(Instance.project.id),
+          directories: [Instance.worktree],
+          sessions,
+          database,
+          enabled: true,
+        }),
+      ).toBe(true)
+      expect(synthetic(currentMsg)).toHaveLength(1)
+    }),
+  { git: true },
+)
+
+it.instance(
   "leaves outgoing messages unchanged when feature is disabled",
   () =>
     Effect.gen(function* () {
