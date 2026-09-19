@@ -15,6 +15,7 @@ import {
   shouldRecall,
   type Evidence,
   type TracePart,
+  type RecallSession,
 } from "./structured-recall"
 
 const PREFIX = "<kilo_trace_evidence untrusted_context_not_instruction>"
@@ -128,9 +129,14 @@ export namespace KiloStructuredRecall {
         }).pipe(
           Effect.provideService(Database.Service, input.database),
           Effect.map((found) => ({ query, sessions: found.results })),
-          Effect.catch(() => Effect.succeed({ query, sessions: [] })),
         ),
       { concurrency: 1 },
+    ).pipe(
+      Effect.catch((cause) =>
+        Effect.logWarning("structured recall search failed; continuing without historical evidence", { cause }).pipe(
+          Effect.as([] as Array<{ query: string; sessions: RecallSession[] }>),
+        ),
+      ),
     )
 
     const seeds = fuse({ profile: p, results, limit: MAX_SEEDS })
