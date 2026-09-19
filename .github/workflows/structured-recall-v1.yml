@@ -1,0 +1,31 @@
+name: structured-recall-v1
+
+on:
+  pull_request:
+    paths:
+      - "packages/opencode/src/kilocode/session/structured-recall*.ts"
+      - "packages/opencode/src/session/prompt.ts"
+      - "packages/opencode/test/kilocode/structured-recall*.test.ts"
+      - ".github/workflows/structured-recall-v1.yml"
+  workflow_dispatch:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup Bun
+        uses: ./.github/actions/setup-bun
+
+      - name: Targeted structured recall tests
+        working-directory: packages/opencode
+        run: |
+          bun test test/kilocode/structured-recall.test.ts
+          bun test test/kilocode/structured-recall-host.test.ts
+          bun test test/kilocode/structured-recall-benchmark.test.ts
+          bun test test/kilocode/recall-search.test.ts
+
+      - name: Opencode typecheck
+        working-directory: packages/opencode
+        run: bun run typecheck
