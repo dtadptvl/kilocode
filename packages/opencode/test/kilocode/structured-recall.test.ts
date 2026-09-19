@@ -1,4 +1,5 @@
 import assert from "node:assert/strict"
+import { test } from "bun:test"
 import {
   closeSeed,
   engineeringEntities,
@@ -10,11 +11,6 @@ import {
   shouldRecall,
   type Evidence,
 } from "../../src/kilocode/session/structured-recall.ts"
-
-function test(name: string, fn: () => void) {
-  fn()
-  console.log(`PASS ${name}`)
-}
 
 test("extracts engineering entities", () => {
   const entities = engineeringEntities(
@@ -156,4 +152,3 @@ test("renders provenance as inert untrusted evidence", () => {
   assert(!text.includes("<system>"))
 })
 
-console.log("PASS 8 tests")
