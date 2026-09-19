@@ -1791,6 +1791,7 @@ export const layer = Layer.effect(
 
           yield* plugin.trigger("experimental.chat.messages.transform", {}, { messages: msgs })
 
+          // kilocode_change start - deterministic historical trace evidence
           yield* KiloStructuredRecall.inject({
             msgs,
             sessionID,
@@ -1799,6 +1800,7 @@ export const layer = Layer.effect(
             directories: [ctx.worktree],
             sessions,
           })
+          // kilocode_change end
 
           // kilocode_change start — ephemeral context injection + post-summary
           // media strip (keeps outgoing body under the gateway body-size limit
@@ -1827,6 +1829,7 @@ export const layer = Layer.effect(
             msgs = KiloSessionPromptQueue.scope(sessionID, msgs)
             msgs = KiloSessionPrompt.trimBeforeLastSummary(msgs)
             yield* plugin.trigger("experimental.chat.messages.transform", {}, { messages: msgs })
+            // kilocode_change start - re-inject ephemeral recall after persisted payload pruning
             yield* KiloStructuredRecall.inject({
               msgs,
               sessionID,
@@ -1835,6 +1838,7 @@ export const layer = Layer.effect(
               directories: [ctx.worktree],
               sessions,
             })
+            // kilocode_change end
             KiloSessionPrompt.injectEditorContext({ msgs, session, sessionID, cache: envCache })
             msgs = KiloSessionPrompt.maybeStripHistoricalMedia(msgs)
             modelMsgs = yield* MessageV2.toModelMessagesEffect(msgs, model).pipe(
