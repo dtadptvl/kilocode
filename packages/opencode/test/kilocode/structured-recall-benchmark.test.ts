@@ -68,7 +68,7 @@ const add = Effect.fn("StructuredRecallBenchmark.add")(function* (
       message_id: messageID,
       session_id: sessionID,
       time_created: Date.now(),
-      data: { type: "text", text },
+      data: { type: "text", text } satisfies Stored<MessageV2.Part>,
     })
     .run()
     .pipe(Effect.orDie)
