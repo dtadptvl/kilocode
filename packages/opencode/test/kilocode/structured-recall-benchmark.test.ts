@@ -1,5 +1,6 @@
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { SessionProjector } from "@opencode-ai/core/session/projector"
+import { Database } from "@opencode-ai/core/database/database"
 import { expect } from "bun:test"
 import { Effect } from "effect"
 import { ProviderV2 } from "@opencode-ai/core/provider"
@@ -22,7 +23,7 @@ import { testEffect } from "../lib/effect"
 
 type Stored<T> = T extends unknown ? Omit<T, "id" | "sessionID" | "messageID"> : never
 
-const it = testEffect(LayerNode.compile(LayerNode.group([Session.node, SessionProjector.node])))
+const it = testEffect(LayerNode.compile(LayerNode.group([Session.node, SessionProjector.node, Database.node])))
 
 const add = Effect.fn("StructuredRecallBenchmark.add")(function* (
   sessionID: SessionID,
