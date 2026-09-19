@@ -1072,6 +1072,7 @@ export const layer = Layer.effect(
                 messageID: info.id,
                 sessionID: input.sessionID,
                 sessions,
+            database,
               })
             // kilocode_change end
             case "file:": {
@@ -1799,6 +1800,7 @@ export const layer = Layer.effect(
             projectID: String(ctx.project.id),
             directories: [ctx.worktree],
             sessions,
+            database,
           })
           // kilocode_change end
 
@@ -1837,6 +1839,7 @@ export const layer = Layer.effect(
               projectID: String(ctx.project.id),
               directories: [ctx.worktree],
               sessions,
+            database,
             })
             // kilocode_change end
             KiloSessionPrompt.injectEditorContext({ msgs, session, sessionID, cache: envCache })
