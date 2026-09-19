@@ -3,6 +3,7 @@ import { MessageID, PartID, SessionID } from "@/session/schema"
 import type { MessageV2 } from "@/session/message-v2"
 import type { Session } from "@/session/session"
 import { RecallSearch } from "@/kilocode/session/recall-search"
+import { Database } from "@opencode-ai/core/database/database"
 import { Filesystem } from "@/util/filesystem"
 import {
   closeSeed,
@@ -103,6 +104,7 @@ export namespace KiloStructuredRecall {
     projectID: string
     directories: string[]
     sessions: Pick<Session.Interface, "list" | "messages">
+    database: Database.Interface
   }) {
     if (!enabled()) return false
     const current = input.msgs.find((message) => message.info.id === input.currentMessageID)
@@ -124,6 +126,7 @@ export namespace KiloStructuredRecall {
           excludeSessionID: input.sessionID,
           excludeFromMessageID: current.info.id,
         }).pipe(
+          Effect.provideService(Database.Service, input.database),
           Effect.map((found) => ({ query, sessions: found.results })),
           Effect.catch(() => Effect.succeed({ query, sessions: [] })),
         ),
