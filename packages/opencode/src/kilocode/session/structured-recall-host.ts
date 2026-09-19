@@ -139,7 +139,7 @@ export namespace KiloStructuredRecall {
       let messages = cache.get(seed.sessionID)
       if (!messages) {
         messages = yield* input.sessions
-          .messages({ sessionID: SessionID.make(seed.sessionID) })
+          .messages({ sessionID: SessionID.descending(seed.sessionID) })
           .pipe(Effect.catch(() => Effect.succeed([] as MessageV2.WithParts[])))
         if (seed.sessionID === input.sessionID) messages = RecallSearch.visible(messages, current.info.id)
         cache.set(seed.sessionID, messages)
