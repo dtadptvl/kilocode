@@ -3,7 +3,6 @@ import { SessionProjector } from "@opencode-ai/core/session/projector"
 import { expect } from "bun:test"
 import { Effect } from "effect"
 import { Database } from "@opencode-ai/core/database/database"
-import { MessageTable, PartTable } from "@opencode-ai/core/session/sql"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 import { ModelV2 } from "@opencode-ai/core/model"
 import { RecallSearch } from "../../src/kilocode/session/recall-search"
@@ -55,23 +54,15 @@ const add = Effect.fn("StructuredRecallBenchmark.add")(function* (
           finish: "stop",
         }
   const partID = PartID.ascending()
-  const { db } = yield* Database.Service
-  yield* db
-    .insert(MessageTable)
-    .values({ id: messageID, session_id: sessionID, time_created: Date.now(), data: message })
-    .run()
-    .pipe(Effect.orDie)
-  yield* db
-    .insert(PartTable)
-    .values({
-      id: partID,
-      message_id: messageID,
-      session_id: sessionID,
-      time_created: Date.now(),
-      data: { type: "text", text } satisfies Stored<MessageV2.Part>,
-    })
-    .run()
-    .pipe(Effect.orDie)
+  const sessions = yield* Session.Service
+  yield* sessions.updateMessage({ id: messageID, sessionID, ...message } as MessageV2.Info)
+  yield* sessions.updatePart({
+    id: partID,
+    messageID,
+    sessionID,
+    type: "text",
+    text,
+  } satisfies MessageV2.TextPart)
   return { messageID, partID }
 })
 
