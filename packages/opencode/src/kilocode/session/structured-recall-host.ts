@@ -6,6 +6,7 @@ import { RecallSearch } from "@/kilocode/session/recall-search"
 import { Database } from "@opencode-ai/core/database/database"
 import { Filesystem } from "@/util/filesystem"
 import {
+  bridgeQueries,
   closeSeed,
   evidenceBudget,
   fuse,
@@ -139,8 +140,29 @@ export namespace KiloStructuredRecall {
       ),
     )
 
-    const seeds = fuse({ profile: p, results, limit: MAX_SEEDS })
+    let seeds = fuse({ profile: p, results, limit: MAX_SEEDS })
     if (seeds.length === 0 && !p.continuation) return false
+
+    const bridges = bridgeQueries({ profile: p, seeds })
+    if (bridges.length > 0) {
+      const bridged = yield* Effect.forEach(
+        bridges,
+        (query) =>
+          RecallSearch.search({
+            query,
+            projectID: input.projectID,
+            directories: input.directories,
+            limit: 6,
+            excludeSessionID: input.sessionID,
+            excludeFromMessageID: current.info.id,
+          }).pipe(
+            Effect.provideService(Database.Service, input.database),
+            Effect.map((found) => ({ query, sessions: found.results })),
+          ),
+        { concurrency: 1 },
+      ).pipe(Effect.catch(() => Effect.succeed([] as Array<{ query: string; sessions: RecallSession[] }>)))
+      if (bridged.length > 0) seeds = fuse({ profile: p, results: [...results, ...bridged], limit: MAX_SEEDS })
+    }
 
     const cache = new Map<string, MessageV2.WithParts[]>()
     const evidence: Evidence[] = seeds.length === 0 ? yield* recentContinuation(input) : []
