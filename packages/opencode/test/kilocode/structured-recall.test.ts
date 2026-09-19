@@ -1,6 +1,7 @@
 import assert from "node:assert/strict"
 import { test } from "bun:test"
 import {
+  bridgeQueries,
   closeSeed,
   engineeringEntities,
   evidenceBudget,
@@ -40,6 +41,29 @@ test("caps retrieval queries to RecallSearch limits", () => {
 
 test("skips trivial generic query", () => {
   assert.equal(shouldRecall(profile("thanks")), false)
+})
+
+test("plans at most two novel relational bridge queries from retrieved evidence", () => {
+  const p = profile("Why did refreshToken() fail in src/auth/token.ts?")
+  const queries = bridgeQueries({
+    profile: p,
+    seeds: [
+      {
+        sessionID: "s1",
+        title: "auth",
+        directory: "/repo",
+        updated: 1,
+        partID: "p1",
+        source: "assistant",
+        text: "refreshToken() fails with ERR_STALE_CREDENTIAL in AuthSessionManager",
+        score: 10,
+        matchedQueries: ["refreshToken()"],
+      },
+    ],
+  })
+  assert(queries.length <= 2)
+  assert(queries.includes("ERR_STALE_CREDENTIAL") || queries.includes("AuthSessionManager"))
+  assert(!queries.includes("refreshToken()"))
 })
 
 test("fuses cross-query matches and favors entity hits", () => {
