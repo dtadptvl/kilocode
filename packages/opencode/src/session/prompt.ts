@@ -1072,7 +1072,6 @@ export const layer = Layer.effect(
                 messageID: info.id,
                 sessionID: input.sessionID,
                 sessions,
-            database,
               })
             // kilocode_change end
             case "file:": {
