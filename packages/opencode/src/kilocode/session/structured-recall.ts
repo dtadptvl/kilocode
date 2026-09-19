@@ -284,7 +284,12 @@ export function evidenceBudget(input: { evidence: Evidence[]; maxChars?: number;
 }
 
 function inert(value: string) {
-  return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;")
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replace(/[\r\n\t]+/g, " ")
+    .trim()
 }
 
 export function renderEvidence(input: Evidence[]) {
