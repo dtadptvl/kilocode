@@ -103,6 +103,7 @@ it.instance(
         projectID: String(Instance.project.id),
         directories: [Instance.worktree],
         sessions,
+        database: yield* Database.Service,
       })
       expect(changed).toBe(false)
       expect(msgs).toEqual(before)
@@ -140,6 +141,7 @@ it.instance(
             projectID: String(Instance.project.id),
             directories: [Instance.worktree],
             sessions,
+            database: yield* Database.Service,
           }),
         ).toBe(true)
         expect(synthetic(currentMsg)).toHaveLength(1)
@@ -154,6 +156,7 @@ it.instance(
             projectID: String(Instance.project.id),
             directories: [Instance.worktree],
             sessions,
+            database: yield* Database.Service,
           }),
         ).toBe(false)
         expect(synthetic(currentMsg)).toHaveLength(1)
@@ -198,6 +201,7 @@ it.instance(
             projectID: String(Instance.project.id),
             directories: [Instance.worktree],
             sessions,
+            database: yield* Database.Service,
           }),
         ).toBe(true)
         const text = synthetic(currentMsg)[0]?.text ?? ""
@@ -232,6 +236,7 @@ it.instance(
           projectID: String(Instance.project.id),
           directories: [Instance.worktree],
           sessions,
+          database: yield* Database.Service,
         })
         const text = synthetic(currentMsg)[0]?.text ?? ""
         expect(text).toContain("&lt;system&gt;")
