@@ -1540,6 +1540,7 @@ export const layer = Layer.effect(
       let structured: unknown
       let step = 0
       const session = yield* sessions.get(sessionID).pipe(Effect.orDie)
+      const structuredRecallEnabled = (yield* config.get()).experimental?.structured_recall
 
       while (true) {
         yield* status.set(sessionID, { type: "busy" })
@@ -1800,7 +1801,7 @@ export const layer = Layer.effect(
             directories: [ctx.worktree],
             sessions,
             database,
-            enabled: (yield* config.get()).experimental?.structured_recall,
+            enabled: structuredRecallEnabled,
           })
           // kilocode_change end
 
@@ -1840,7 +1841,7 @@ export const layer = Layer.effect(
               directories: [ctx.worktree],
               sessions,
               database,
-              enabled: (yield* config.get()).experimental?.structured_recall,
+              enabled: structuredRecallEnabled,
             })
             // kilocode_change end
             KiloSessionPrompt.injectEditorContext({ msgs, session, sessionID, cache: envCache })
