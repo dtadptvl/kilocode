@@ -1839,7 +1839,7 @@ export const layer = Layer.effect(
               projectID: String(ctx.project.id),
               directories: [ctx.worktree],
               sessions,
-            database,
+              database,
             })
             // kilocode_change end
             KiloSessionPrompt.injectEditorContext({ msgs, session, sessionID, cache: envCache })
