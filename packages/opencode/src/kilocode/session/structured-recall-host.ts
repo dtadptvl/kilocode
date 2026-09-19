@@ -95,8 +95,10 @@ function recentContinuation(input: {
 }
 
 export namespace KiloStructuredRecall {
-  export function enabled() {
-    return process.env.KILO_EXPERIMENTAL_STRUCTURED_RECALL === "1"
+  export function enabled(config?: boolean) {
+    if (process.env.KILO_EXPERIMENTAL_STRUCTURED_RECALL === "1") return true
+    if (process.env.KILO_EXPERIMENTAL_STRUCTURED_RECALL === "0") return false
+    return config === true
   }
 
   export const inject = Effect.fn("KiloStructuredRecall.inject")(function* (input: {
@@ -107,8 +109,9 @@ export namespace KiloStructuredRecall {
     directories: string[]
     sessions: Pick<Session.Interface, "list" | "messages">
     database: Database.Interface
+    enabled?: boolean
   }) {
-    if (!enabled()) return false
+    if (!enabled(input.enabled)) return false
     const current = input.msgs.find((message) => message.info.id === input.currentMessageID)
     if (!current || current.info.role !== "user" || hasEvidence(current)) return false
 
