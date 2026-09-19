@@ -3,6 +3,7 @@ import { MessageID, PartID, SessionID } from "@/session/schema"
 import type { MessageV2 } from "@/session/message-v2"
 import type { Session } from "@/session/session"
 import { RecallSearch } from "@/kilocode/session/recall-search"
+import { Filesystem } from "@/util/filesystem"
 import {
   closeSeed,
   evidenceBudget,
@@ -60,11 +61,17 @@ function flatten(messages: MessageV2.WithParts[]): TracePart[] {
 
 function recentContinuation(input: {
   sessionID: SessionID
+  directories: string[]
   sessions: Pick<Session.Interface, "list" | "messages">
 }) {
   return Effect.gen(function* () {
+    const roots = input.directories.map(Filesystem.resolve)
     const recent = yield* input.sessions.list({ scope: "project", limit: 8 })
-    const prior = recent.find((item) => item.id !== input.sessionID)
+    const prior = recent.find(
+      (item) =>
+        item.id !== input.sessionID &&
+        roots.some((root) => Filesystem.contains(root, Filesystem.resolve(item.directory))),
+    )
     if (!prior) return [] as Evidence[]
     const messages = yield* input.sessions
       .messages({ sessionID: prior.id })
