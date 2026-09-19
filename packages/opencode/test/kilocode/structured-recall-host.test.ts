@@ -119,7 +119,7 @@ it.instance(
       Effect.gen(function* () {
         yield* seedProject
         const sessions = yield* Session.Service
-      const database = yield* Database.Service
+        const database = yield* Database.Service
         const historical = yield* sessions.create({ title: "Historical auth" })
         yield* add(historical.id, "user", { type: "text", text: "Investigate refreshToken() in src/auth/token.ts" })
         yield* add(historical.id, "assistant", {
@@ -174,7 +174,7 @@ it.instance(
       Effect.gen(function* () {
         yield* seedProject
         const sessions = yield* Session.Service
-      const database = yield* Database.Service
+        const database = yield* Database.Service
         const current = yield* sessions.create({ title: "Queued" })
         const prior = yield* add(current.id, "user", { type: "text", text: "Investigate boundaryNeedle() failure" })
         yield* add(
@@ -222,7 +222,7 @@ it.instance(
       Effect.gen(function* () {
         yield* seedProject
         const sessions = yield* Session.Service
-      const database = yield* Database.Service
+        const database = yield* Database.Service
         const historical = yield* sessions.create({ title: "Untrusted" })
         yield* add(historical.id, "user", {
           type: "text",
