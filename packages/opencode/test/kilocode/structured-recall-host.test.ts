@@ -92,6 +92,7 @@ it.instance(
       yield* seedProject
       delete process.env.KILO_EXPERIMENTAL_STRUCTURED_RECALL
       const sessions = yield* Session.Service
+      const database = yield* Database.Service
       const current = yield* sessions.create({ title: "Current" })
       const turn = yield* add(current.id, "user", { type: "text", text: "Find refreshToken() history" })
       const msgs = yield* sessions.messages({ sessionID: current.id })
@@ -103,7 +104,7 @@ it.instance(
         projectID: String(Instance.project.id),
         directories: [Instance.worktree],
         sessions,
-        database: yield* Database.Service,
+        database,
       })
       expect(changed).toBe(false)
       expect(msgs).toEqual(before)
@@ -118,6 +119,7 @@ it.instance(
       Effect.gen(function* () {
         yield* seedProject
         const sessions = yield* Session.Service
+      const database = yield* Database.Service
         const historical = yield* sessions.create({ title: "Historical auth" })
         yield* add(historical.id, "user", { type: "text", text: "Investigate refreshToken() in src/auth/token.ts" })
         yield* add(historical.id, "assistant", {
@@ -141,7 +143,7 @@ it.instance(
             projectID: String(Instance.project.id),
             directories: [Instance.worktree],
             sessions,
-            database: yield* Database.Service,
+            database,
           }),
         ).toBe(true)
         expect(synthetic(currentMsg)).toHaveLength(1)
@@ -156,7 +158,7 @@ it.instance(
             projectID: String(Instance.project.id),
             directories: [Instance.worktree],
             sessions,
-            database: yield* Database.Service,
+            database,
           }),
         ).toBe(false)
         expect(synthetic(currentMsg)).toHaveLength(1)
@@ -172,6 +174,7 @@ it.instance(
       Effect.gen(function* () {
         yield* seedProject
         const sessions = yield* Session.Service
+      const database = yield* Database.Service
         const current = yield* sessions.create({ title: "Queued" })
         const prior = yield* add(current.id, "user", { type: "text", text: "Investigate boundaryNeedle() failure" })
         yield* add(
@@ -201,7 +204,7 @@ it.instance(
             projectID: String(Instance.project.id),
             directories: [Instance.worktree],
             sessions,
-            database: yield* Database.Service,
+            database,
           }),
         ).toBe(true)
         const text = synthetic(currentMsg)[0]?.text ?? ""
@@ -219,6 +222,7 @@ it.instance(
       Effect.gen(function* () {
         yield* seedProject
         const sessions = yield* Session.Service
+      const database = yield* Database.Service
         const historical = yield* sessions.create({ title: "Untrusted" })
         yield* add(historical.id, "user", {
           type: "text",
@@ -236,7 +240,7 @@ it.instance(
           projectID: String(Instance.project.id),
           directories: [Instance.worktree],
           sessions,
-          database: yield* Database.Service,
+          database,
         })
         const text = synthetic(currentMsg)[0]?.text ?? ""
         expect(text).toContain("&lt;system&gt;")
