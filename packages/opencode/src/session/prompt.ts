@@ -1800,6 +1800,7 @@ export const layer = Layer.effect(
             directories: [ctx.worktree],
             sessions,
             database,
+            enabled: (yield* config.get()).experimental?.structured_recall,
           })
           // kilocode_change end
 
@@ -1839,6 +1840,7 @@ export const layer = Layer.effect(
               directories: [ctx.worktree],
               sessions,
               database,
+              enabled: (yield* config.get()).experimental?.structured_recall,
             })
             // kilocode_change end
             KiloSessionPrompt.injectEditorContext({ msgs, session, sessionID, cache: envCache })
