@@ -150,7 +150,10 @@ it.instance(
 
       expect(structuredCoverage).toBeGreaterThanOrEqual(baselineCoverage)
       expect(structuredCoverage).toBe(1)
-      expect(new Set(structuredIDs)).toEqual(expect.objectContaining(new Set([p1.partID, p2.partID, p3.partID])))
+      const structuredSet = new Set(structuredIDs)
+      expect(structuredSet.has(p1.partID)).toBe(true)
+      expect(structuredSet.has(p2.partID)).toBe(true)
+      expect(structuredSet.has(p3.partID)).toBe(true)
 
       console.log(
         JSON.stringify({
