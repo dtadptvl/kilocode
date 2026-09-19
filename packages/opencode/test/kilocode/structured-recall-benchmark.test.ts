@@ -135,8 +135,14 @@ it.instance(
       )
       seeds = fuse({ profile: p, results: [...primary, ...bridged], limit: 8 })
 
+      const evidence: Evidence[] = []
+      for (const seed of seeds) {
+        const messages = yield* sessions.messages({ sessionID: seed.sessionID as SessionID })
+        evidence.push(...closeSeed({ seed, parts: trace(messages), neighbors: 1 }))
+      }
+
       expect(bridges.length).toBeLessThanOrEqual(2)
-      expect(seeds.some((seed) => seed.partID === root.partID)).toBe(true)
+      expect(evidence.some((item) => item.partID === root.partID)).toBe(true)
     }),
   { git: true },
 )
