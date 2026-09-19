@@ -173,6 +173,18 @@ export function retrievalQueries(input: QueryProfile) {
   return uniq(queries.map(safeQuery), 5).filter((item) => item.length >= 2)
 }
 
+export function bridgeQueries(input: { profile: QueryProfile; seeds: Seed[] }) {
+  const known = new Set([...input.profile.entities, ...input.profile.terms].map(normalize))
+  const values: string[] = []
+  for (const seed of input.seeds.slice(0, 4)) {
+    for (const entity of engineeringEntities(seed.text)) {
+      if (known.has(normalize(entity))) continue
+      values.push(entity)
+    }
+  }
+  return uniq(values.map(safeQuery), 2).filter((item) => item.length >= 2)
+}
+
 function countTerms(text: string, values: string[]) {
   const body = normalize(text)
   let count = 0
