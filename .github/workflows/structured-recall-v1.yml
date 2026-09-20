@@ -6,6 +6,8 @@ on:
       - "packages/opencode/src/kilocode/session/structured-recall*.ts"
       - "packages/opencode/src/session/prompt.ts"
       - "packages/opencode/test/kilocode/structured-recall*.test.ts"
+      - "packages/core/src/v1/config/config.ts"
+      - "packages/kilo-docs/pages/customize/context/memory.md"
       - ".github/workflows/structured-recall-v1.yml"
   workflow_dispatch:
 
