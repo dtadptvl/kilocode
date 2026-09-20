@@ -1,10 +1,10 @@
 # Zero-Mem for Kilo Code CLI
 
-Zero-Mem is a deterministic long-term recall plugin for Kilo Code CLI. It is inspired by the **Zero-Mem** research architecture: keep the original interaction traces as the source of truth, build non-generative retrieval structure over those traces, and retrieve provenance-bearing evidence when the agent needs historical context instead of repeatedly asking an LLM to rewrite history into summaries or memory cards.
+Zero-Mem is a deterministic long-term recall plugin for Kilo Code CLI. It is inspired by **Zero-Mem: Zero-Token Memory Operations for LLM Agents**: keep the original interaction traces as the source of truth, build non-generative retrieval structure over those traces, and retrieve provenance-bearing evidence when the agent needs historical context instead of repeatedly asking an LLM to rewrite history into summaries or memory cards.
 
 For Kilo, that means the plugin searches prior raw coding sessions before model inference, identifies engineering entities such as file paths, symbols and error codes, retrieves relevant trace parts, follows one bounded relational bridge when useful, expands the immediate temporal neighborhood around a hit, and injects the resulting raw evidence into the current turn as explicitly untrusted historical context.
 
-The goal is to preserve more of the original evidence while avoiding an additional memory-model call. The implementation deliberately stays smaller than the full research architecture: it uses Kilo's public session API and deterministic lexical/entity retrieval rather than requiring a vector database, embedding model, graph database, daemon, or patch to Kilo itself.
+The paper proposes zero-token memory operations: memory handling itself does not invoke an LLM or consume LLM input/output tokens; original interaction traces remain the source of record, organized through relational and temporal views. This plugin adapts that direction to Kilo's coding-session history while keeping the implementation intentionally lightweight. The implementation deliberately stays smaller than the full research architecture: it uses Kilo's public session API and deterministic lexical/entity retrieval rather than requiring a vector database, embedding model, graph database, daemon, or patch to Kilo itself.
 
 ## Install
 
@@ -84,7 +84,7 @@ Explicit `/memory remember`, `/memory correct`, and `/memory forget` remain avai
 
 ## Research attribution
 
-This project is an independent Kilo Code CLI integration inspired by the ideas in the **Zero-Mem** research paper. The underlying research concepts and credit belong to the paper's authors; this repository is not presented as their official or reference implementation.
+This project is an independent Kilo Code CLI integration inspired by the ideas in the **Zero-Mem: Zero-Token Memory Operations for LLM Agents**. The underlying research concepts and credit belong to the paper's authors; this repository is not presented as their official or reference implementation.
 
 - **Paper:** [Zero-Mem on arXiv](https://arxiv.org/abs/2607.29377)
 - **PDF:** [arXiv PDF](https://arxiv.org/pdf/2607.29377)
