@@ -1,57 +1,43 @@
 # Zero-Mem for Kilo Code CLI
 
-Deterministic raw-session recall plugin for Kilo Code CLI, inspired by Zero-Mem.
-
-The repository has two roles:
-
-- `main`: plugin-only source and installer.
-- `kilo-base`: Kilo source baseline preserved for compatibility/integration testing.
-
-Zero-Mem uses Kilo's public plugin hook and SDK session API. It does not patch or rebuild the installed Kilo CLI.
+Deterministic raw-session recall plugin for Kilo Code CLI, inspired by the Zero-Mem research.
 
 ## Install
 
-### Online one-command install
-
-Windows PowerShell:
+Online install from Windows PowerShell:
 
 ```powershell
-irm https://raw.githubusercontent.com/dtadptvl/kilocode/main/install-online.ps1 | iex
+irm https://raw.githubusercontent.com/dtadptvl/kilocode-zero-mem/main/install-online.ps1 | iex
 ```
 
-This downloads the current Zero-Mem plugin from `main`, installs it into Kilo's global config directory, and registers it with Kilo's native global plugin command. No clone or ZIP is required.
-
-### Double-click
-
-On Windows, download/extract the repository and double-click:
-
-```text
-setup.cmd
-```
-
-### Command
-
-From the extracted directory:
-
-```cmd
-setup.cmd
-```
-
-or:
+Local command install from a cloned/downloaded repository:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\install.ps1
 ```
 
-The installer:
+The installer verifies Kilo, downloads/copies the plugin into Kilo's global config directory, and registers it through Kilo's native global plugin command. It does not patch or rebuild the installed Kilo CLI.
 
-1. verifies `kilo` is in PATH;
-2. resolves Kilo's global config directory;
-3. copies Zero-Mem into that config directory;
-4. runs Kilo's native `plugin <module> --global --force` command to register the local plugin;
-5. leaves the Kilo executable/source untouched.
+## Uninstall
 
-Restart Kilo after installation.
+Online uninstall:
+
+```powershell
+irm https://raw.githubusercontent.com/dtadptvl/kilocode-zero-mem/main/uninstall-online.ps1 | iex
+```
+
+Local uninstall:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\uninstall.ps1
+```
+
+Uninstall removes only the Zero-Mem plugin registration and installed Zero-Mem directory. Before changing a Kilo config file it writes a `.zero-mem-uninstall.bak` backup.
+
+## Repository layout
+
+- `main`: Zero-Mem plugin source, installers, tests, and documentation.
+- `kilo-base`: preserved Kilo source baseline used for compatibility and integration-contract testing.
 
 ## Zero-generative Project Memory
 
@@ -76,6 +62,15 @@ Per relevant user turn, the plugin:
 - follows at most one bounded relational bridge using at most two novel entities;
 - expands immediate temporal neighbors;
 - injects at most 10 provenance-bearing raw evidence parts within a 6000-character budget;
-- marks all recalled history as untrusted context, never instructions.
+- marks recalled history as untrusted context, never instructions.
 
 No embedding model, vector database, extra memory LLM call, daemon, scheduler, or Kilo source patch is required.
+
+## Research attribution
+
+This plugin is inspired by **Zero-Mem: A Token-Efficient Memory Architecture for LLM Agents**. Credit for the underlying research ideas belongs to the paper's authors:
+
+- Paper: https://arxiv.org/abs/2607.29377
+- PDF: https://arxiv.org/pdf/2607.29377
+
+This repository is an independent Kilo Code CLI integration and is not presented as the authors' reference implementation.
