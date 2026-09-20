@@ -32,6 +32,44 @@ jobs:
           [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path './uninstall-online.ps1'), [ref]$null, [ref]$errors)
           if ($errors.Count) { $errors | ForEach-Object { Write-Error $_ }; exit 1 }
 
+
+  windows-installer-smoke:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Smoke-test online/local install and uninstall
+        shell: pwsh
+        run: |
+          $fake = Join-Path $env:RUNNER_TEMP 'fake-bin'
+          $config = Join-Path $env:RUNNER_TEMP 'kilo-config'
+          New-Item -ItemType Directory -Force $fake, $config | Out-Null
+          $kilo = Join-Path $fake 'kilo.cmd'
+          @"
+@echo off
+if "%1"=="debug" if "%2"=="paths" (
+  echo config  $config
+  exit /b 0
+)
+if "%1"=="plugin" (
+  powershell -NoProfile -Command "$c='$config'; $f=Join-Path $c 'opencode.json'; if(Test-Path $f){$j=Get-Content -Raw $f|ConvertFrom-Json}else{$j=[pscustomobject]@{}}; $p='%2'; if(-not $j.PSObject.Properties['plugin']){$j|Add-Member -NotePropertyName plugin -NotePropertyValue @()}; $j.plugin=@($j.plugin)+$p; $j|ConvertTo-Json -Depth 10|Set-Content -Encoding UTF8 $f"
+  exit /b 0
+)
+exit /b 1
+"@ | Set-Content -Encoding ASCII $kilo
+          $env:PATH = "$fake;$env:PATH"
+
+          & ./install.ps1
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          if (-not (Test-Path (Join-Path $config 'zero-mem/src/index.ts'))) { throw 'plugin source not installed' }
+          $cfg = Get-Content -Raw (Join-Path $config 'opencode.json')
+          if ($cfg -notmatch 'zero-mem') { throw 'plugin not registered' }
+
+          & ./uninstall.ps1
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          if (Test-Path (Join-Path $config 'zero-mem')) { throw 'plugin directory not removed' }
+          $cfg = Get-Content -Raw (Join-Path $config 'opencode.json')
+          if ($cfg -match 'zero-mem') { throw 'plugin registration not removed' }
+
   kilo-base-contract:
     runs-on: ubuntu-latest
     steps:
