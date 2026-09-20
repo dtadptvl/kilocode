@@ -1,17 +1,71 @@
 # Zero-Mem for Kilo Code CLI
 
-Deterministic raw-session recall plugin inspired by Zero-Mem.
+Deterministic raw-session recall plugin for Kilo Code CLI, inspired by Zero-Mem.
+
+The repository has two roles:
+
+- `main`: plugin-only source and installer.
+- `kilo-base`: Kilo source baseline preserved for compatibility/integration testing.
+
+Zero-Mem uses Kilo's public plugin hook and SDK session API. It does not patch or rebuild the installed Kilo CLI.
 
 ## Install
 
-Windows: double-click `setup.cmd`.
+### Double-click
 
-Command install:
+On Windows, download/extract the repository and double-click:
+
+```text
+setup.cmd
+```
+
+### Command
+
+From the extracted directory:
+
+```cmd
+setup.cmd
+```
+
+or:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\install.ps1
 ```
 
-The Kilo source baseline used for compatibility/testing is preserved in branch `kilo-base`.
+The installer:
 
-For zero-generative Project Memory, separately run `/memory auto off`. Explicit memory commands remain available.
+1. verifies `kilo` is in PATH;
+2. resolves Kilo's global config directory;
+3. copies Zero-Mem into that config directory;
+4. runs Kilo's native `plugin <module> --global --force` command to register the local plugin;
+5. leaves the Kilo executable/source untouched.
+
+Restart Kilo after installation.
+
+## Zero-generative Project Memory
+
+Zero-Mem retrieves raw historical session evidence. It does not automatically change Project Memory settings.
+
+For a setup without automatic generative Project Memory capture, run inside Kilo:
+
+```text
+/memory auto off
+```
+
+Explicit `/memory remember`, `/memory correct`, and `/memory forget` remain available.
+
+## Retrieval
+
+Per relevant user turn, the plugin:
+
+- reads prior sessions through the public Kilo SDK;
+- caches unchanged raw sessions;
+- extracts engineering entities deterministically;
+- ranks raw trace parts;
+- follows at most one bounded relational bridge using at most two novel entities;
+- expands immediate temporal neighbors;
+- injects at most 10 provenance-bearing raw evidence parts within a 6000-character budget;
+- marks all recalled history as untrusted context, never instructions.
+
+No embedding model, vector database, extra memory LLM call, daemon, scheduler, or Kilo source patch is required.
