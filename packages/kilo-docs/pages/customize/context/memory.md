@@ -98,6 +98,37 @@ Recall supports four modes:
 
 Memory is context, not instruction. Current messages, repository files, and [AGENTS.md](/docs/customize/agents-md) take precedence over saved memory.
 
+## Structured recall (experimental)
+
+Structured recall is an opt-in retrieval path over raw session history. It does not create generated summaries or memory records. Before model inference, Kilo deterministically extracts engineering entities from the current query, searches prior raw session messages, follows at most one bounded relational bridge, expands immediate temporal neighbors, and injects a bounded provenance-bearing evidence block into the current user turn.
+
+Enable it in project configuration:
+
+```jsonc
+{
+  "experimental": {
+    "structured_recall": true
+  }
+}
+```
+
+Structured recall is independent of Project Memory:
+
+- Raw session messages remain the source of truth; the injected evidence is synthetic and is not written back to history.
+- Retrieved history is treated as untrusted context, not instructions.
+- Current repository files, tool results, and current messages take precedence over retrieved history.
+- The feature reuses local session storage and recall search. It does not require an embedding model, vector database, or additional LLM call.
+- Project Memory can remain enabled for explicit durable facts and corrections.
+
+For a zero-generative-memory setup, enable structured recall and disable automatic Project Memory capture:
+
+```text
+/memory on
+/memory auto off
+```
+
+Explicit `/memory remember`, `/memory correct`, and `/memory forget` remain available. Context condensing is separate and still handles active-session context-window pressure.
+
 ## Command reference
 
 The `/memory` command is also available as `/mem`.

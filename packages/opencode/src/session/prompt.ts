@@ -6,6 +6,7 @@ import fs from "node:fs" // kilocode_change
 import { SessionV1 } from "@opencode-ai/core/v1/session"
 import os from "os"
 import { KiloSessionPrompt } from "@/kilocode/session/prompt" // kilocode_change
+import { KiloStructuredRecall } from "@/kilocode/session/structured-recall-host" // kilocode_change
 import { BoardContext } from "@/kilocode/board/context" // kilocode_change
 import { SKILL_SHELL_DISABLED, SKILL_SHELL_UNTRUSTED } from "@/kilocode/skills/display" // kilocode_change
 import { KiloSessionMessageOrder } from "@/kilocode/session/message-order" // kilocode_change
@@ -1539,6 +1540,7 @@ export const layer = Layer.effect(
       let structured: unknown
       let step = 0
       const session = yield* sessions.get(sessionID).pipe(Effect.orDie)
+      const structuredRecallEnabled = (yield* config.get()).experimental?.structured_recall
 
       while (true) {
         yield* status.set(sessionID, { type: "busy" })
@@ -1790,6 +1792,19 @@ export const layer = Layer.effect(
 
           yield* plugin.trigger("experimental.chat.messages.transform", {}, { messages: msgs })
 
+          // kilocode_change start - deterministic historical trace evidence
+          yield* KiloStructuredRecall.inject({
+            msgs,
+            sessionID,
+            currentMessageID: lastUser.id,
+            projectID: String(ctx.project.id),
+            directories: [ctx.worktree],
+            sessions,
+            database,
+            enabled: structuredRecallEnabled,
+          })
+          // kilocode_change end
+
           // kilocode_change start — ephemeral context injection + post-summary
           // media strip (keeps outgoing body under the gateway body-size limit
           // even when filterCompacted couldn't trim the pre-summary history).
@@ -1817,6 +1832,18 @@ export const layer = Layer.effect(
             msgs = KiloSessionPromptQueue.scope(sessionID, msgs)
             msgs = KiloSessionPrompt.trimBeforeLastSummary(msgs)
             yield* plugin.trigger("experimental.chat.messages.transform", {}, { messages: msgs })
+            // kilocode_change start - re-inject ephemeral recall after persisted payload pruning
+            yield* KiloStructuredRecall.inject({
+              msgs,
+              sessionID,
+              currentMessageID: lastUser.id,
+              projectID: String(ctx.project.id),
+              directories: [ctx.worktree],
+              sessions,
+              database,
+              enabled: structuredRecallEnabled,
+            })
+            // kilocode_change end
             KiloSessionPrompt.injectEditorContext({ msgs, session, sessionID, cache: envCache })
             msgs = KiloSessionPrompt.maybeStripHistoricalMedia(msgs)
             modelMsgs = yield* MessageV2.toModelMessagesEffect(msgs, model).pipe(

@@ -314,6 +314,10 @@ export const Info = Schema.Struct({
       task_model_selection: Schema.optional(Schema.Boolean).annotate({
         description: "Allow task subagents to select a model, provider, and reasoning effort",
       }),
+      structured_recall: Schema.optional(Schema.Boolean).annotate({
+        description:
+          "Enable deterministic structured recall over raw session history before model inference (experimental)",
+      }),
       code_mode: Schema.optional(Schema.Boolean).annotate({
         description:
           "Route MCP tool calls through a confined JavaScript runtime with on-demand tool discovery instead of exposing every MCP tool directly",
