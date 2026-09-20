@@ -11,6 +11,16 @@ Zero-Mem uses Kilo's public plugin hook and SDK session API. It does not patch o
 
 ## Install
 
+### Online one-command install
+
+Windows PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/dtadptvl/kilocode/main/install-online.ps1 | iex
+```
+
+This downloads the current Zero-Mem plugin from `main`, installs it into Kilo's global config directory, and registers it with Kilo's native global plugin command. No clone or ZIP is required.
+
 ### Double-click
 
 On Windows, download/extract the repository and double-click:
