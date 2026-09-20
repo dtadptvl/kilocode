@@ -1,0 +1,33 @@
+name: zero-mem
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install
+      - run: bun test
+      - run: bunx tsc --noEmit
+
+  kilo-base-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: kilo-base
+          path: kilo
+      - name: Verify required Kilo plugin/SDK contracts
+        shell: bash
+        run: |
+          grep -q '"experimental.chat.messages.transform"' kilo/packages/plugin/src/index.ts
+          grep -q 'public list<' kilo/packages/sdk/js/src/gen/sdk.gen.ts
+          grep -q 'public messages<' kilo/packages/sdk/js/src/gen/sdk.gen.ts
+          grep -q 'command: "plugin <module>"' kilo/packages/opencode/src/cli/cmd/plug.ts
