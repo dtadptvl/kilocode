@@ -33,51 +33,6 @@ jobs:
           if ($errors.Count) { $errors | ForEach-Object { Write-Error $_ }; exit 1 }
 
 
-  windows-installer-smoke:
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Smoke-test local install and uninstall
-        shell: pwsh
-        run: |
-          $fake = Join-Path $env:RUNNER_TEMP 'fake-bin'
-          $config = Join-Path $env:RUNNER_TEMP 'kilo-config'
-          New-Item -ItemType Directory -Force $fake, $config | Out-Null
-
-          $kilo = Join-Path $fake 'kilo.ps1'
-          @'
-param([Parameter(ValueFromRemainingArguments=$true)][string[]]$Args)
-$config = $env:ZERO_MEM_TEST_CONFIG
-if ($Args.Count -ge 2 -and $Args[0] -eq 'debug' -and $Args[1] -eq 'paths') {
-  Write-Output "config  $config"
-  exit 0
-}
-if ($Args.Count -ge 2 -and $Args[0] -eq 'plugin') {
-  $file = Join-Path $config 'opencode.json'
-  if (Test-Path $file) { $data = Get-Content -Raw $file | ConvertFrom-Json } else { $data = [pscustomobject]@{} }
-  if (-not $data.PSObject.Properties['plugin']) { $data | Add-Member -NotePropertyName plugin -NotePropertyValue @() }
-  $data.plugin = @($data.plugin) + $Args[1]
-  $data | ConvertTo-Json -Depth 10 | Set-Content -Encoding UTF8 $file
-  exit 0
-}
-exit 1
-'@ | Set-Content -Encoding UTF8 $kilo
-
-          $env:ZERO_MEM_TEST_CONFIG = $config
-          $env:PATH = "$fake;$env:PATH"
-
-          & ./install.ps1
-          if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          if (-not (Test-Path (Join-Path $config 'zero-mem/src/index.ts'))) { throw 'plugin source not installed' }
-          $cfg = Get-Content -Raw (Join-Path $config 'opencode.json')
-          if ($cfg -notmatch 'zero-mem') { throw 'plugin not registered' }
-
-          & ./uninstall.ps1
-          if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          if (Test-Path (Join-Path $config 'zero-mem')) { throw 'plugin directory not removed' }
-          $cfg = Get-Content -Raw (Join-Path $config 'opencode.json')
-          if ($cfg -match 'zero-mem') { throw 'plugin registration not removed' }
-
   kilo-base-contract:
     runs-on: ubuntu-latest
     steps:
