@@ -16,6 +16,15 @@ jobs:
       - run: bun install
       - run: bun test
       - run: bunx tsc --noEmit
+      - name: Parse PowerShell installers
+        shell: pwsh
+        run: |
+          $errors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path './install.ps1'), [ref]$null, [ref]$errors)
+          if ($errors.Count) { $errors | ForEach-Object { Write-Error $_ }; exit 1 }
+          $errors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path './install-online.ps1'), [ref]$null, [ref]$errors)
+          if ($errors.Count) { $errors | ForEach-Object { Write-Error $_ }; exit 1 }
 
   kilo-base-contract:
     runs-on: ubuntu-latest
