@@ -37,25 +37,33 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Smoke-test online/local install and uninstall
+      - name: Smoke-test local install and uninstall
         shell: pwsh
         run: |
           $fake = Join-Path $env:RUNNER_TEMP 'fake-bin'
           $config = Join-Path $env:RUNNER_TEMP 'kilo-config'
           New-Item -ItemType Directory -Force $fake, $config | Out-Null
-          $kilo = Join-Path $fake 'kilo.cmd'
-          @"
-@echo off
-if "%1"=="debug" if "%2"=="paths" (
-  echo config  $config
-  exit /b 0
-)
-if "%1"=="plugin" (
-  powershell -NoProfile -Command "$c='$config'; $f=Join-Path $c 'opencode.json'; if(Test-Path $f){$j=Get-Content -Raw $f|ConvertFrom-Json}else{$j=[pscustomobject]@{}}; $p='%2'; if(-not $j.PSObject.Properties['plugin']){$j|Add-Member -NotePropertyName plugin -NotePropertyValue @()}; $j.plugin=@($j.plugin)+$p; $j|ConvertTo-Json -Depth 10|Set-Content -Encoding UTF8 $f"
-  exit /b 0
-)
-exit /b 1
-"@ | Set-Content -Encoding ASCII $kilo
+
+          $kilo = Join-Path $fake 'kilo.ps1'
+          @'
+param([Parameter(ValueFromRemainingArguments=$true)][string[]]$Args)
+$config = $env:ZERO_MEM_TEST_CONFIG
+if ($Args.Count -ge 2 -and $Args[0] -eq 'debug' -and $Args[1] -eq 'paths') {
+  Write-Output "config  $config"
+  exit 0
+}
+if ($Args.Count -ge 2 -and $Args[0] -eq 'plugin') {
+  $file = Join-Path $config 'opencode.json'
+  if (Test-Path $file) { $data = Get-Content -Raw $file | ConvertFrom-Json } else { $data = [pscustomobject]@{} }
+  if (-not $data.PSObject.Properties['plugin']) { $data | Add-Member -NotePropertyName plugin -NotePropertyValue @() }
+  $data.plugin = @($data.plugin) + $Args[1]
+  $data | ConvertTo-Json -Depth 10 | Set-Content -Encoding UTF8 $file
+  exit 0
+}
+exit 1
+'@ | Set-Content -Encoding UTF8 $kilo
+
+          $env:ZERO_MEM_TEST_CONFIG = $config
           $env:PATH = "$fake;$env:PATH"
 
           & ./install.ps1
