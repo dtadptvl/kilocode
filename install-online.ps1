@@ -1,6 +1,6 @@
 $ErrorActionPreference = 'Stop'
 
-$Repo = 'dtadptvl/kilocode'
+$Repo = 'dtadptvl/kilocode-zero-mem'
 $Ref = 'main'
 $Raw = "https://raw.githubusercontent.com/$Repo/$Ref"
 
