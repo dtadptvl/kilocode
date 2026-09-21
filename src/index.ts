@@ -1,6 +1,6 @@
 import path from "node:path"
 import { fileURLToPath } from "node:url"
-import type { Plugin } from "@kilocode/plugin"
+import type { KiloPlugin as Plugin } from "./kilo.js"
 import {
   COMPACTING_TTL_MS,
   MAX_INGEST_PER_TURN,
