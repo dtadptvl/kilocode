@@ -16,8 +16,11 @@ if ($Args.Count -ge 2 -and $Args[0] -eq 'debug' -and $Args[1] -eq 'paths') {
   exit 0
 }
 if ($Args.Count -ge 2 -and $Args[0] -eq 'plugin') {
-  if ($env:ZERO_MEM_SMOKE_FAIL_PLUGIN -eq '1') { exit 9 }
   $file = Join-Path $config 'opencode.json'
+  if ($env:ZERO_MEM_SMOKE_FAIL_PLUGIN -eq '1') {
+    Set-Content -Encoding UTF8 -LiteralPath $file -Value '{"plugin":["BROKEN_BY_FAILED_REGISTRATION"]}'
+    exit 9
+  }
   if (Test-Path $file) { $data = Get-Content -Raw $file | ConvertFrom-Json } else { $data = [pscustomobject]@{} }
   if (-not $data.PSObject.Properties['plugin']) { $data | Add-Member -NotePropertyName plugin -NotePropertyValue @() }
   $spec = $Args[1]
@@ -44,6 +47,8 @@ exit 1
   $pluginRoot = Join-Path $config 'zero-mem'
   New-Item -ItemType Directory -Force -Path $pluginRoot | Out-Null
   Set-Content -LiteralPath (Join-Path $pluginRoot 'old-marker.txt') -Value 'old-working-installation'
+  Set-Content -Encoding UTF8 -LiteralPath (Join-Path $config 'opencode.json') -Value '{"plugin":["baseline-registration"]}'
+  $configBeforeFailure = Get-Content -Raw -LiteralPath (Join-Path $config 'opencode.json')
   $env:ZERO_MEM_SMOKE_FAIL_PLUGIN = '1'
   $failed = $false
   try {
@@ -53,6 +58,8 @@ exit 1
   }
   if (-not $failed) { throw 'expected registration failure was not surfaced' }
   if (-not (Test-Path (Join-Path $pluginRoot 'old-marker.txt'))) { throw 'failed update did not rollback previous installation' }
+  $configAfterFailure = Get-Content -Raw -LiteralPath (Join-Path $config 'opencode.json')
+  if ($configAfterFailure -ne $configBeforeFailure) { throw 'failed update did not rollback Kilo global config' }
 
   $global:LASTEXITCODE = 0
   Write-Host 'PASS Windows install/uninstall/rollback smoke'
