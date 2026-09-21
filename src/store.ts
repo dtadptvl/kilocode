@@ -1,8 +1,15 @@
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises"
 import path from "node:path"
-import { MAX_INDEX_SESSIONS, MAX_TRACES_PER_SESSION, type Trace } from "./core.js"
+import {
+  MAX_INDEX_SESSIONS,
+  MAX_TRACES_PER_SESSION,
+  entities,
+  normalize,
+  tokens,
+  type Trace,
+} from "./core.js"
 
-const VERSION = 1
+const VERSION = 2
 
 export type IndexedSession = {
   projectID: string
@@ -11,6 +18,7 @@ export type IndexedSession = {
   updated: number
   fingerprint: string
   traces: Trace[]
+  lookup: Record<string, number[]>
 }
 
 type ProjectIndex = {
@@ -18,7 +26,7 @@ type ProjectIndex = {
 }
 
 type IndexFile = {
-  version: 1
+  version: 2
   projects: Record<string, ProjectIndex>
 }
 
@@ -30,6 +38,18 @@ function valid(value: unknown): value is IndexFile {
   if (!value || typeof value !== "object") return false
   const row = value as Record<string, unknown>
   return row.version === VERSION && !!row.projects && typeof row.projects === "object"
+}
+
+function buildLookup(traces: Trace[]) {
+  const lookup: Record<string, number[]> = {}
+  traces.forEach((trace, index) => {
+    const keys = new Set([...trace.entities, ...entities(trace.text), ...tokens(trace.text)].map(normalize))
+    for (const key of keys) {
+      if (!key) continue
+      ;(lookup[key] ??= []).push(index)
+    }
+  })
+  return lookup
 }
 
 export class PersistentIndex {
@@ -67,38 +87,48 @@ export class PersistentIndex {
     return this.data.projects[projectID]?.sessions[sessionID]
   }
 
-  traces(projectID: string) {
-    const sessions = Object.values(this.data.projects[projectID]?.sessions ?? {})
-      .sort((a, b) => b.updated - a.updated)
-      .slice(0, MAX_INDEX_SESSIONS)
-    return sessions.flatMap((session) => session.traces)
-  }
-
   sessions(projectID: string) {
     return Object.values(this.data.projects[projectID]?.sessions ?? {})
       .sort((a, b) => b.updated - a.updated)
       .slice(0, MAX_INDEX_SESSIONS)
   }
 
-  upsert(session: IndexedSession) {
-    const project = this.project(session.projectID)
-    project.sessions[session.sessionID] = {
-      ...session,
-      traces: session.traces.slice(-MAX_TRACES_PER_SESSION),
+  candidates(projectID: string, query: string) {
+    const keys = new Set([...entities(query), ...tokens(query)].map(normalize))
+    if (!keys.size) return [] as Trace[]
+
+    const out: Trace[] = []
+    const seen = new Set<string>()
+    for (const session of this.sessions(projectID)) {
+      const indexes = new Set<number>()
+      for (const key of keys) {
+        for (const index of session.lookup[key] ?? []) indexes.add(index)
+      }
+      for (const index of indexes) {
+        const trace = session.traces[index]
+        if (!trace) continue
+        const id = trace.sessionID + ":" + trace.partID
+        if (seen.has(id)) continue
+        seen.add(id)
+        out.push(trace)
+      }
+    }
+    return out
+  }
+
+  upsert(input: Omit<IndexedSession, "lookup"> & { lookup?: Record<string, number[]> }) {
+    const project = this.project(input.projectID)
+    const traces = input.traces.slice(-MAX_TRACES_PER_SESSION)
+    project.sessions[input.sessionID] = {
+      ...input,
+      traces,
+      lookup: buildLookup(traces),
     }
 
     const keep = Object.values(project.sessions)
       .sort((a, b) => b.updated - a.updated)
       .slice(0, MAX_INDEX_SESSIONS)
     project.sessions = Object.fromEntries(keep.map((item) => [item.sessionID, item]))
-  }
-
-  removeUnknown(projectID: string, knownSessionIDs: Set<string>) {
-    const project = this.data.projects[projectID]
-    if (!project) return
-    for (const sessionID of Object.keys(project.sessions)) {
-      if (!knownSessionIDs.has(sessionID)) delete project.sessions[sessionID]
-    }
   }
 
   async save() {
