@@ -49,7 +49,7 @@ describe("persistent derived index", () => {
     const next = new PersistentIndex(file)
     await next.load()
     expect(next.session("p", "s")?.fingerprint).toBe("s:v:10")
-    expect(next.traces("p")[0]?.text).toBe("needle")
+    expect(next.session("p", "s")?.traces[0]?.text).toBe("needle")
   })
 
   test("bounds retained sessions and traces", async () => {
@@ -78,7 +78,7 @@ describe("persistent derived index", () => {
 
     const store = new PersistentIndex(file)
     await expect(store.load()).resolves.toBeUndefined()
-    expect(store.traces("p")).toEqual([])
+    expect(store.sessions("p")).toEqual([])
 
     store.upsert({
       projectID: "p",
