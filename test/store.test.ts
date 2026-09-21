@@ -52,6 +52,26 @@ describe("persistent derived index", () => {
     expect(next.traces("p")[0]?.text).toBe("needle")
   })
 
+  test("bounds retained sessions and traces", async () => {
+    const file = await tempFile()
+    const store = new PersistentIndex(file)
+    await store.load()
+
+    for (let index = 0; index < 505; index++) {
+      store.upsert({
+        projectID: "p",
+        sessionID: "s-" + index,
+        directory: "/repo",
+        updated: index,
+        fingerprint: "fp-" + index,
+        traces: index === 504 ? Array.from({ length: 820 }, (_, part) => trace("p-" + part, "x")) : [trace("p", "x")],
+      })
+    }
+
+    expect(store.sessions("p")).toHaveLength(500)
+    expect(store.session("p", "s-504")?.traces).toHaveLength(800)
+  })
+
   test("corrupted index is quarantined and recreated fail-open", async () => {
     const file = await tempFile()
     await writeFile(file, "{not-json", "utf8")
