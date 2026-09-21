@@ -60,6 +60,15 @@ try {
   $hadPrevious = Test-Path -LiteralPath $pluginRoot
   if ($hadPrevious) { Move-Item -LiteralPath $pluginRoot -Destination $rollbackRoot }
 
+  $configBackups = @()
+  foreach ($name in @('opencode.json', 'opencode.jsonc')) {
+    $file = Join-Path $configRoot $name
+    if (-not (Test-Path -LiteralPath $file)) { continue }
+    $backup = "$file.zero-mem-install-rollback.bak"
+    Copy-Item -Force -LiteralPath $file -Destination $backup
+    $configBackups += [pscustomobject]@{ File = $file; Backup = $backup }
+  }
+
   try {
     Move-Item -LiteralPath $stageRoot -Destination $pluginRoot
     $spec = 'file://' + (($pluginRoot -replace '\\','/'))
@@ -72,9 +81,17 @@ try {
     if ($hadPrevious -and (Test-Path -LiteralPath $rollbackRoot)) {
       Move-Item -LiteralPath $rollbackRoot -Destination $pluginRoot
     }
+    foreach ($item in $configBackups) {
+      if (Test-Path -LiteralPath $item.Backup) {
+        Copy-Item -Force -LiteralPath $item.Backup -Destination $item.File
+      }
+    }
     throw
   }
 
+  foreach ($item in $configBackups) {
+    Remove-Item -Force -ErrorAction SilentlyContinue -LiteralPath $item.Backup
+  }
   Remove-Item -Recurse -Force -ErrorAction SilentlyContinue -LiteralPath $rollbackRoot
   Write-Host ''
   Write-Host "PASS: Zero-Mem $version installed and registered globally." -ForegroundColor Green
