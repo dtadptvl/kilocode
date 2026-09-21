@@ -144,6 +144,25 @@ describe("plugin behavior", () => {
     expect(injected(current)).toHaveLength(1)
   })
 
+  test("clears compacting state after compaction failure event", async () => {
+    const historical = session("history", "project-1", "/repo/main", 10)
+    const { hooks } = await plugin({
+      sessions: [historical],
+      messages: {
+        history: [
+          message("h1", "history", "assistant", [textPart("h1p", "history", "h1", "failureResumeNeedle() evidence")], 1),
+        ],
+      },
+    })
+    const { current, output } = currentOutput("current-session", "Recall failureResumeNeedle()")
+    await hooks["experimental.session.compacting"]!({ sessionID: "current-session" }, { context: [] })
+    await hooks.event!({
+      event: { type: "session.error", properties: { sessionID: "current-session", error: { name: "UnknownError" } } } as any,
+    })
+    await hooks["experimental.chat.messages.transform"]!({}, output as any)
+    expect(injected(current)).toHaveLength(1)
+  })
+
   test("session.list failure and retrieval timeout fail open", async () => {
     const listFailure = await plugin({
       sessions: [],
@@ -268,6 +287,37 @@ describe("plugin behavior", () => {
     expect(text).toContain("TS2322")
     expect(text).toContain("source_tool=bash")
     expect(text).toContain("type=tool")
+  })
+
+  test("refreshes an updated session incrementally", async () => {
+    const file = await indexFile()
+    const firstSession = session("history", "project-1", "/repo/main", 10)
+    const first = await plugin({
+      file,
+      sessions: [firstSession],
+      messages: {
+        history: [
+          message("h1", "history", "assistant", [textPart("h1p", "history", "h1", "oldVersionNeedle() evidence")], 1),
+        ],
+      },
+    })
+    const one = currentOutput("current-a", "Recall oldVersionNeedle()")
+    await first.hooks["experimental.chat.messages.transform"]!({}, one.output as any)
+
+    const updatedSession = session("history", "project-1", "/repo/main", 11)
+    const second = await plugin({
+      file,
+      sessions: [updatedSession],
+      messages: {
+        history: [
+          message("h2", "history", "assistant", [textPart("h2p", "history", "h2", "newVersionNeedle() evidence")], 2),
+        ],
+      },
+    })
+    const two = currentOutput("current-b", "Recall newVersionNeedle()")
+    await second.hooks["experimental.chat.messages.transform"]!({}, two.output as any)
+    expect(second.calls.messages).toEqual(["history"])
+    expect(injected(two.current)[0]?.text).toContain("newVersionNeedle()")
   })
 
   test("persistent index reuses unchanged sessions across plugin instances", async () => {
