@@ -1,5 +1,5 @@
 param(
-  [string]$Ref = 'main'
+  [string]$Ref = '698feab92845278d8ca2d584879cacafae7dc2d6'
 )
 
 $ErrorActionPreference = 'Stop'
