@@ -181,6 +181,7 @@ export function createZeroMem(options: FactoryOptions = {}): Plugin {
         return
       }
       if (token.cancelled) return
+      if (listed?.error) return
 
       const sessions = ((listed?.data ?? []) as any[])
         .filter((session) => String(session.projectID ?? "") === String(project.id))
@@ -205,6 +206,7 @@ export function createZeroMem(options: FactoryOptions = {}): Plugin {
         try {
           const response = await sessionMessages(client as any, session)
           if (token.cancelled) return
+          if (response?.error) throw response.error
           const traces = flattenSession(String(project.id), session, response?.data ?? [])
           index.upsert({
             projectID: String(project.id),
