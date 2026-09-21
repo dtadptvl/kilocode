@@ -16,7 +16,7 @@ Windows PowerShell:
 irm https://raw.githubusercontent.com/dtadptvl/kilocode-zero-mem/main/install-online.ps1 | iex
 ```
 
-No clone or ZIP is required. The production one-liner downloads `install-online.ps1` from `main`, but that script pins the plugin payload to the immutable Zero-Mem 0.2.0 source commit `698feab92845278d8ca2d584879cacafae7dc2d6` rather than mutable `main`.
+No clone or ZIP is required. The production one-liner downloads `install-online.ps1` from `main`, but that script pins the plugin payload to the immutable Zero-Mem 0.2.0 source commit `9646b7c23b7b452864aa6c3e96bbb77064c30ded` rather than mutable `main`.
 
 The installer:
 
