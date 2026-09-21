@@ -14,6 +14,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
       - run: bun install
+      - name: Show generated lockfile for pinning
+        run: cat bun.lock
       - run: bun test
       - run: bun run typecheck
       - name: Parse PowerShell lifecycle scripts
