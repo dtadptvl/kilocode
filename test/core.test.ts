@@ -80,7 +80,7 @@ describe("retrieval core", () => {
     )
     const out = render(rows)
     expect(rows.slice(0, MAX_EVIDENCE_ITEMS)).toHaveLength(MAX_EVIDENCE_ITEMS)
-    expect(out.length).toBeLessThanOrEqual(MAX_EVIDENCE_CHARS + 64)
+    expect(out.length).toBeLessThanOrEqual(MAX_EVIDENCE_CHARS)
   })
 
   test("historical markup remains inert untrusted evidence", () => {
