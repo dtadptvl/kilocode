@@ -91,7 +91,7 @@ describe("persistent derived index", () => {
     await store.save()
 
     const parsed = JSON.parse(await readFile(file, "utf8"))
-    expect(parsed.version).toBe(1)
+    expect(parsed.version).toBe(2)
     expect(parsed.projects.p.sessions.s.traces[0].text).toBe("recovered")
   })
 })
