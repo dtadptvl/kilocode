@@ -225,16 +225,17 @@ export function createZeroMem(options: FactoryOptions = {}): Plugin {
 
       const visible = visibleTailPartIDs(output.messages)
       const currentMessageID = String(current.info?.id ?? "")
-      const traces = index
-        .traces(String(project.id))
-        .filter((trace) => trace.messageID !== currentMessageID)
-        .filter((trace) => !visible.has(trace.partID))
+      const allowed = (trace: Trace) => trace.messageID !== currentMessageID && !visible.has(trace.partID)
 
-      if (!traces.length) return
-      let seeds = rank(query, traces, { directory, limit: 8 })
+      const candidates = index.candidates(String(project.id), query).filter(allowed)
+      if (!candidates.length) return
+
+      let seeds = rank(query, candidates, { directory, limit: 8 })
       const bridges = bridgeQueries(query, seeds)
       if (bridges.length) {
-        const extra = bridges.flatMap((bridge) => rank(bridge, traces, { directory, limit: 4 }))
+        const extra = bridges.flatMap((bridge) =>
+          rank(bridge, index.candidates(String(project.id), bridge).filter(allowed), { directory, limit: 4 }),
+        )
         const merged = new Map<string, (typeof seeds)[number]>()
         for (const seed of [...seeds, ...extra]) {
           const key = seed.sessionID + ":" + seed.partID
@@ -247,13 +248,12 @@ export function createZeroMem(options: FactoryOptions = {}): Plugin {
       }
 
       const bySession = new Map<string, Trace[]>()
-      for (const trace of traces) {
-        const list = bySession.get(trace.sessionID) ?? []
-        list.push(trace)
-        bySession.set(trace.sessionID, list)
-      }
-      for (const list of bySession.values()) {
-        list.sort((a, b) => a.timestamp - b.timestamp || a.partID.localeCompare(b.partID))
+      for (const seed of seeds) {
+        if (bySession.has(seed.sessionID)) continue
+        const sessionTraces = (index.session(String(project.id), seed.sessionID)?.traces ?? [])
+          .filter(allowed)
+          .sort((a, b) => a.timestamp - b.timestamp || a.partID.localeCompare(b.partID))
+        bySession.set(seed.sessionID, sessionTraces)
       }
 
       const evidence = render(close(seeds, bySession))
