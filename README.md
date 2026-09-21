@@ -16,15 +16,21 @@ Windows PowerShell:
 irm https://raw.githubusercontent.com/dtadptvl/kilocode-zero-mem/main/install-online.ps1 | iex
 ```
 
-No clone or ZIP is required. The installer:
+No clone or ZIP is required. The production one-liner downloads `install-online.ps1` from `main`, but that script pins the plugin payload to the immutable Zero-Mem 0.2.0 source commit `698feab92845278d8ca2d584879cacafae7dc2d6` rather than mutable `main`.
+
+The installer:
 
 1. verifies that `kilo` is available;
 2. resolves Kilo's global config directory;
-3. downloads the current plugin source from this repository;
-4. registers the local package through Kilo's native `plugin <module> --global --force` command;
-5. leaves the installed Kilo executable and source untouched.
+3. downloads/copies the plugin into a staging directory;
+4. validates the required plugin files and manifest;
+5. preserves the existing local derived index during upgrades;
+6. replaces the working plugin directory only after staging succeeds;
+7. registers the local package through Kilo's native `plugin <module> --global --force` command;
+8. restores the previous working plugin if registration fails;
+9. prints the installed Zero-Mem version.
 
-Restart Kilo after installation.
+It leaves the installed Kilo executable and source untouched. Restart Kilo after installation.
 
 ### Local command install
 
@@ -52,18 +58,27 @@ Uninstall removes the Zero-Mem global plugin registration and its installed plug
 
 ## How it works
 
-Per relevant user turn, Zero-Mem:
+Per relevant normal user turn, Zero-Mem:
 
-1. reads prior sessions through Kilo's public SDK;
-2. reuses cached traces for sessions that have not changed;
-3. extracts engineering entities deterministically;
-4. ranks raw trace parts against the current query;
-5. follows at most one bounded relational bridge using at most two novel entities found in retrieved evidence;
-6. expands the immediate previous/next trace parts around selected evidence;
-7. bounds the result to at most 10 evidence items and 6000 characters;
-8. escapes recalled markup and injects the result as `untrusted_context_not_instruction`.
+1. lists sessions at Kilo project scope and rejects any session whose `projectID` differs from the current project;
+2. incrementally ingests only new or changed sessions into a bounded local persistent derived index;
+3. can recall old history from the current long-running session while excluding the current message and a small deterministic visible tail;
+4. indexes user/assistant text, file references, and bounded tool evidence including tool name, input, status, compiler/test errors, and bounded stdout/stderr-like output;
+5. extracts engineering entities such as paths, symbols, error codes and provider/model-like IDs deterministically;
+6. uses order-insensitive weighted token/entity scoring rather than exact phrase-substring matching;
+7. queries a persistent inverted token/entity lookup instead of rescanning every raw historical session on each turn;
+8. follows at most one bounded relational bridge using at most two novel entities;
+9. expands only the immediate previous/current/next evidence neighborhood;
+10. bounds the result to at most 10 evidence items within a strict 6000-character budget;
+11. escapes recalled markup and injects the result as `untrusted_context_not_instruction`.
 
-Current repository state, current tool results and the current conversation take precedence over recalled history.
+Raw Kilo session history remains authoritative. The local index is derived data and can be discarded/rebuilt. Current user instruction, repository/tool evidence, current task state and the current conversation take precedence over recalled history.
+
+## Compaction isolation
+
+Zero-Mem uses Kilo's public compaction hook to mark a session while compaction is running. During that interval it does not inject recalled history into `experimental.chat.messages.transform`, so recalled evidence cannot be folded into Kilo's persistent generated compaction summary.
+
+The marker is cleared by Kilo lifecycle events such as `session.compacted`, `session.idle`, `session.error`, or idle `session.status`, with a bounded stale-marker timeout as a final guard. Normal recall then resumes.
 
 ## Safety and failure isolation
 
@@ -73,7 +88,7 @@ Retrieval uses a fixed timeout and no retry loop inside a turn. A session-list f
 
 ## Persistent derived index
 
-The plugin currently uses a local JSON-derived index rather than SQLite. This avoids a runtime dependency while still providing bounded incremental ingestion, content/version fingerprints, and an inverted token/entity lookup. The index is written through a temporary file before replacement, bounded by explicit session/trace caps, and safe to quarantine/rebuild when corrupt.
+The plugin currently uses a local JSON-derived index rather than SQLite. This avoids a runtime dependency while still providing bounded incremental ingestion, content/version fingerprints, and an inverted token/entity lookup. The index stores project/session/message/part provenance, timestamp, role/type, directory/worktree metadata, bounded raw evidence text, deterministic entities and source/tool metadata. It is written through a temporary file before replacement, bounded by explicit session/trace caps, and safe to quarantine/rebuild when missing or corrupt.
 
 ## Relation to Kilo Project Memory
 
