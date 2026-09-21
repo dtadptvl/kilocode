@@ -1,1 +1,20 @@
-{"name":"kilo-zero-mem","version":"0.1.0","private":true,"type":"module","description":"Zero-Mem deterministic raw-session recall plugin for Kilo Code CLI","exports":{"./server":{"import":"./src/index.ts"}},"scripts":{"test":"bun test"},"dependencies":{"@kilocode/plugin":"latest"}}
+{
+  "name": "kilo-zero-mem",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "description": "Zero-Mem deterministic raw-session recall plugin for Kilo Code CLI",
+  "exports": {
+    "./server": {
+      "import": "./src/index.ts"
+    }
+  },
+  "scripts": {
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "22.15.3",
+    "typescript": "5.8.3"
+  }
+}

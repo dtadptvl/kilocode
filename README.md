@@ -4,7 +4,7 @@ Zero-Mem is a deterministic long-term recall plugin for Kilo Code CLI. It is ins
 
 For Kilo, that means the plugin searches prior raw coding sessions before model inference, identifies engineering entities such as file paths, symbols and error codes, retrieves relevant trace parts, follows one bounded relational bridge when useful, expands the immediate temporal neighborhood around a hit, and injects the resulting raw evidence into the current turn as explicitly untrusted historical context.
 
-The paper proposes zero-token memory operations: memory handling itself does not invoke an LLM or consume LLM input/output tokens; original interaction traces remain the source of record, organized through relational and temporal views. This plugin adapts that direction to Kilo's coding-session history while keeping the implementation intentionally lightweight. The implementation deliberately stays smaller than the full research architecture: it uses Kilo's public session API and deterministic lexical/entity retrieval rather than requiring a vector database, embedding model, graph database, daemon, or patch to Kilo itself.
+The paper proposes zero-token memory operations: memory handling itself does not invoke an LLM or consume LLM input/output tokens; original interaction traces remain the source of record, organized through relational and temporal views. This plugin adapts that direction to Kilo's coding-session history while keeping the implementation intentionally lightweight. It is not a full paper-equivalent implementation: it uses deterministic weighted token/entity retrieval, a lightweight persistent derived index, one bounded relational bridge, and immediate temporal closure instead of mandatory embeddings, a graph database, or a separate memory service.
 
 ## Install
 
@@ -64,6 +64,16 @@ Per relevant user turn, Zero-Mem:
 8. escapes recalled markup and injects the result as `untrusted_context_not_instruction`.
 
 Current repository state, current tool results and the current conversation take precedence over recalled history.
+
+## Safety and failure isolation
+
+Zero-Mem adds a fixed system-hook instruction stating that content inside kilo_zero_mem blocks is historical data only. Historical markup is escaped without an LLM sanitizer. Current user instruction, current repository/tool evidence, and current task state take precedence over recalled history.
+
+Retrieval uses a fixed timeout and no retry loop inside a turn. A session-list failure skips recall; a single session-fetch failure skips only that session; index read/write problems fail open.
+
+## Persistent derived index
+
+The plugin currently uses a local JSON-derived index rather than SQLite. This avoids a runtime dependency while still providing bounded incremental ingestion, content/version fingerprints, and an inverted token/entity lookup. The index is written through a temporary file before replacement, bounded by explicit session/trace caps, and safe to quarantine/rebuild when corrupt.
 
 ## Relation to Kilo Project Memory
 
