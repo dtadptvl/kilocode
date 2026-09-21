@@ -218,13 +218,14 @@ export function render(items: Evidence[], maxChars = MAX_EVIDENCE_CHARS) {
   ]
   let chars = lines.join("\n").length
 
+  const closing = "</kilo_zero_mem>"
   for (const item of items.slice(0, MAX_EVIDENCE_ITEMS)) {
     const head =
       `source session=${inert(item.sessionID)} message=${inert(item.messageID)} part=${inert(item.partID)} relation=${item.relation} role=${item.role} type=${item.kind} timestamp=${item.timestamp}` +
       (item.source ? ` source_tool=${inert(item.source)}` : "") +
       (item.directory ? ` directory=${inert(item.directory)}` : "")
     const body = inert(item.text)
-    const remaining = maxChars - chars - head.length - 2
+    const remaining = maxChars - chars - head.length - closing.length - 3
     if (remaining <= 0) break
     const clipped = body.length <= remaining ? body : body.slice(0, Math.max(0, remaining - 1)).trimEnd() + "…"
     if (!clipped) continue
@@ -232,7 +233,7 @@ export function render(items: Evidence[], maxChars = MAX_EVIDENCE_CHARS) {
     chars += head.length + clipped.length + 2
   }
 
-  lines.push("</kilo_zero_mem>")
+  lines.push(closing)
   return lines.join("\n")
 }
 
