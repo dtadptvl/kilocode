@@ -54,6 +54,7 @@ exit 1
   if (-not $failed) { throw 'expected registration failure was not surfaced' }
   if (-not (Test-Path (Join-Path $pluginRoot 'old-marker.txt'))) { throw 'failed update did not rollback previous installation' }
 
+  $global:LASTEXITCODE = 0
   Write-Host 'PASS Windows install/uninstall/rollback smoke'
 } finally {
   Remove-Item Env:ZERO_MEM_SMOKE_FAIL_PLUGIN -ErrorAction SilentlyContinue
