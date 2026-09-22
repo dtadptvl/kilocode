@@ -219,6 +219,7 @@ export function createZeroMem(options: FactoryOptions = {}): Plugin {
     await index.load().catch(() => undefined)
 
     const compacting = new Map<string, number>()
+    const dirtySessions = new Set<string>()
     const timeoutMs = options.timeoutMs ?? RETRIEVAL_TIMEOUT_MS
 
     function compactingNow(sessionID: string) {
@@ -229,25 +230,35 @@ export function createZeroMem(options: FactoryOptions = {}): Plugin {
       return false
     }
 
-    async function ingest(projectIDs: string[], sessions: any[], token: CancelToken) {
+    async function ingest(
+      projectIDs: string[],
+      sessions: any[],
+      token: CancelToken,
+      fresh: Map<string, Trace[]>,
+    ) {
       let changed = false
       for (const session of sessions) {
         if (token.cancelled) break
+        const sessionID = String(session.id)
         try {
           const response = await sessionMessages(client as any, session)
           if (token.cancelled) break
           if (response?.error) throw response.error
+          const traces = flattenSession(session, response?.data ?? [])
+          fresh.set(sessionID, traces)
+          if (dirtySessions.has(sessionID)) index.remove(sessionID)
           index.upsert(projectIDs, {
             projectID: String(session.projectID ?? ""),
-            sessionID: String(session.id),
+            sessionID,
             directory: String(session.directory ?? ""),
             updated: Number(session.time?.updated ?? 0),
             fingerprint: fingerprint(session),
-            traces: flattenSession(session, response?.data ?? []),
+            traces,
           })
+          dirtySessions.delete(sessionID)
           changed = true
         } catch {
-          // One unavailable/corrupt session must not block recall from other sessions.
+          // Dirty sessions stay unavailable until a raw Kilo refetch succeeds.
         }
       }
       return changed
@@ -283,6 +294,9 @@ export function createZeroMem(options: FactoryOptions = {}): Plugin {
       }
       if (token.cancelled || listed?.error) return
 
+      await index.refresh().catch(() => undefined)
+      if (token.cancelled) return
+
       const sessions = ((listed?.data ?? []) as any[])
         .filter((session) => session?.id && session?.directory)
         .sort((a, b) => Number(b.time?.updated ?? 0) - Number(a.time?.updated ?? 0))
@@ -296,11 +310,16 @@ export function createZeroMem(options: FactoryOptions = {}): Plugin {
       const family = index.reconcileFamily(projectIDs, liveSessionIDs, authoritative)
 
       const changed = sessions
-        .filter((session) => index.session(String(session.id))?.fingerprint !== fingerprint(session))
+        .filter(
+          (session) =>
+            dirtySessions.has(String(session.id)) ||
+            index.session(String(session.id))?.fingerprint !== fingerprint(session),
+        )
         .sort(changedOrder(query, currentSessionID))
 
+      const fresh = new Map<string, Trace[]>()
       const first = changed.slice(0, MAX_INGEST_PER_TURN)
-      let dirty = await ingest(projectIDs, first, token)
+      let dirty = await ingest(projectIDs, first, token, fresh)
       if (token.cancelled) return
 
       const visible = visibleTailPartIDs(output.messages)
@@ -309,6 +328,7 @@ export function createZeroMem(options: FactoryOptions = {}): Plugin {
         if (trace.messageID === currentMessageID || visible.has(trace.partID)) return false
         const live = liveSessions.get(trace.sessionID)
         if (!live) return false
+        if (dirtySessions.has(trace.sessionID)) return false
         return index.session(trace.sessionID)?.fingerprint === fingerprint(live)
       }
 
@@ -317,7 +337,7 @@ export function createZeroMem(options: FactoryOptions = {}): Plugin {
 
       if ((seeds[0]?.score ?? 0) < COLD_START_MIN_SCORE && changed.length > first.length && !token.cancelled) {
         const extra = changed.slice(first.length, first.length + COLD_START_EXTRA_INGEST)
-        dirty = (await ingest(projectIDs, extra, token)) || dirty
+        dirty = (await ingest(projectIDs, extra, token, fresh)) || dirty
         if (!token.cancelled) seeds = ranked()
       }
 
@@ -341,16 +361,76 @@ export function createZeroMem(options: FactoryOptions = {}): Plugin {
           .slice(0, 8)
       }
 
-      const bySession = new Map<string, Trace[]>()
-      for (const seed of seeds) {
-        if (bySession.has(seed.sessionID)) continue
-        const sessionTraces = (index.session(seed.sessionID)?.traces ?? [])
-          .filter(allowed)
-          .sort((a, b) => a.timestamp - b.timestamp || a.partID.localeCompare(b.partID))
-        bySession.set(seed.sessionID, sessionTraces)
+      // Final validity comes from raw Kilo transcript for only the bounded
+      // selected candidate sessions. This closes cross-process/event gaps where
+      // session.time.updated did not change.
+      const selectedSessionIDs = [...new Set(seeds.map((seed) => seed.sessionID))]
+      const verifiedBySession = new Map<string, Trace[]>()
+      let verificationMutatedIndex = false
+
+      for (const sessionID of selectedSessionIDs) {
+        if (token.cancelled) return
+        const live = liveSessions.get(sessionID)
+        if (!live) continue
+
+        let traces = fresh.get(sessionID)
+        if (!traces) {
+          try {
+            const response = await sessionMessages(client as any, live)
+            if (token.cancelled) return
+            if (response?.error) throw response.error
+            traces = flattenSession(live, response?.data ?? [])
+            fresh.set(sessionID, traces)
+          } catch {
+            dirtySessions.add(sessionID)
+            index.remove(sessionID)
+            verificationMutatedIndex = true
+            continue
+          }
+        }
+
+        const prior = index.session(sessionID)?.traces ?? []
+        if (dirtySessions.has(sessionID) || JSON.stringify(prior) !== JSON.stringify(traces)) {
+          index.remove(sessionID)
+          index.upsert(projectIDs, {
+            projectID: String(live.projectID ?? ""),
+            sessionID,
+            directory: String(live.directory ?? ""),
+            updated: Number(live.time?.updated ?? 0),
+            fingerprint: fingerprint(live),
+            traces,
+          })
+          verificationMutatedIndex = true
+        }
+        dirtySessions.delete(sessionID)
+        verifiedBySession.set(
+          sessionID,
+          traces
+            .filter((trace) => trace.messageID !== currentMessageID && !visible.has(trace.partID))
+            .sort((a, b) => a.timestamp - b.timestamp || a.partID.localeCompare(b.partID)),
+        )
       }
 
-      const evidence = render(close(seeds, bySession))
+      if (verificationMutatedIndex) await index.save().catch(() => false)
+      if (token.cancelled || verifiedBySession.size === 0) return
+
+      const verifiedTraces = [...verifiedBySession.values()].flat()
+      const verifiedQueries = [query, ...bridges]
+      const verifiedMerged = new Map<string, (typeof seeds)[number]>()
+      for (const verifiedQuery of verifiedQueries) {
+        for (const seed of rank(verifiedQuery, verifiedTraces, { directory, limit: 8 })) {
+          const key = seed.sessionID + ":" + seed.partID
+          const prior = verifiedMerged.get(key)
+          if (!prior || seed.score > prior.score) verifiedMerged.set(key, seed)
+        }
+      }
+      seeds = [...verifiedMerged.values()]
+        .sort((a, b) => b.score - a.score || b.timestamp - a.timestamp)
+        .slice(0, 8)
+        .filter((seed) => !dirtySessions.has(seed.sessionID))
+      if (!seeds.length) return
+
+      const evidence = render(close(seeds, verifiedBySession))
       if (!evidence || token.cancelled) return
 
       current.parts.push({
@@ -369,13 +449,34 @@ export function createZeroMem(options: FactoryOptions = {}): Plugin {
       event: async ({ event }) => {
         const type = (event as any)?.type
         const properties = (event as any)?.properties ?? {}
-        const sessionID = String(properties.sessionID ?? properties.info?.id ?? "")
+        const sessionID = String(
+          properties.sessionID ??
+            properties.info?.sessionID ??
+            properties.part?.sessionID ??
+            properties.info?.id ??
+            "",
+        )
         if (!sessionID) return
 
         if (type === "session.deleted") {
+          dirtySessions.delete(sessionID)
           index.remove(sessionID)
           await index.save().catch(() => false)
           compacting.delete(sessionID)
+          return
+        }
+
+        if (
+          type === "message.removed" ||
+          type === "message.updated" ||
+          type === "message.part.removed" ||
+          type === "message.part.updated"
+        ) {
+          if (!dirtySessions.has(sessionID)) {
+            dirtySessions.add(sessionID)
+            index.remove(sessionID)
+            await index.save().catch(() => false)
+          }
           return
         }
 
