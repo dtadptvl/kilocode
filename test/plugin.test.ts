@@ -466,6 +466,198 @@ describe("plugin behavior", () => {
     expect(injected(two.current)).toHaveLength(0)
   })
 
+  test("message.part.removed invalidates indexed part and refetches raw transcript", async () => {
+    const file = await indexFile()
+    const historical = session("history", "project-A", "/repo/main", 10)
+    let source = [
+      message("h1", "history", "assistant", [textPart("part-old", "history", "h1", "deletedPartNeedle() evidence")], 1),
+    ]
+    const instance = await plugin({
+      file,
+      sessions: [historical],
+      messages: { history: async () => ({ data: source }) },
+    })
+
+    const before = currentOutput("current-a", "Recall deletedPartNeedle()")
+    await instance.hooks["experimental.chat.messages.transform"]!({}, before.output as any)
+    expect(injected(before.current)[0]?.text).toContain("deletedPartNeedle()")
+
+    source = [message("h1", "history", "assistant", [], 1)]
+    await instance.hooks.event!({
+      event: {
+        type: "message.part.removed",
+        properties: { sessionID: "history", messageID: "h1", partID: "part-old" },
+      } as any,
+    })
+
+    const after = currentOutput("current-b", "Recall deletedPartNeedle()")
+    await instance.hooks["experimental.chat.messages.transform"]!({}, after.output as any)
+    expect(injected(after.current)).toHaveLength(0)
+  })
+
+  test("message.removed invalidates indexed message and refetches raw transcript", async () => {
+    const file = await indexFile()
+    const historical = session("history", "project-A", "/repo/main", 10)
+    let source = [
+      message("h1", "history", "assistant", [textPart("part-old", "history", "h1", "deletedMessageNeedle() evidence")], 1),
+    ]
+    const instance = await plugin({
+      file,
+      sessions: [historical],
+      messages: { history: async () => ({ data: source }) },
+    })
+
+    const before = currentOutput("current-a", "Recall deletedMessageNeedle()")
+    await instance.hooks["experimental.chat.messages.transform"]!({}, before.output as any)
+    expect(injected(before.current)[0]?.text).toContain("deletedMessageNeedle()")
+
+    source = []
+    await instance.hooks.event!({
+      event: { type: "message.removed", properties: { sessionID: "history", messageID: "h1" } } as any,
+    })
+
+    const after = currentOutput("current-b", "Recall deletedMessageNeedle()")
+    await instance.hooks["experimental.chat.messages.transform"]!({}, after.output as any)
+    expect(injected(after.current)).toHaveLength(0)
+  })
+
+  test("message.part.updated replaces stale content without session metadata bump", async () => {
+    const file = await indexFile()
+    const historical = session("history", "project-A", "/repo/main", 10)
+    let source = [
+      message("h1", "history", "assistant", [textPart("part-1", "history", "h1", "oldPartNeedle() evidence")], 1),
+    ]
+    const instance = await plugin({
+      file,
+      sessions: [historical],
+      messages: { history: async () => ({ data: source }) },
+    })
+
+    const before = currentOutput("current-a", "Recall oldPartNeedle()")
+    await instance.hooks["experimental.chat.messages.transform"]!({}, before.output as any)
+    expect(injected(before.current)[0]?.text).toContain("oldPartNeedle()")
+
+    source = [
+      message("h1", "history", "assistant", [textPart("part-1", "history", "h1", "newPartNeedle() evidence")], 1),
+    ]
+    await instance.hooks.event!({
+      event: {
+        type: "message.part.updated",
+        properties: { part: textPart("part-1", "history", "h1", "newPartNeedle() evidence") },
+      } as any,
+    })
+
+    const oldQuery = currentOutput("current-b", "Recall oldPartNeedle()")
+    await instance.hooks["experimental.chat.messages.transform"]!({}, oldQuery.output as any)
+    expect(injected(oldQuery.current)).toHaveLength(0)
+
+    const newQuery = currentOutput("current-c", "Recall newPartNeedle()")
+    await instance.hooks["experimental.chat.messages.transform"]!({}, newQuery.output as any)
+    expect(injected(newQuery.current)[0]?.text).toContain("newPartNeedle()")
+  })
+
+  test("message.updated replaces stale message content without session metadata bump", async () => {
+    const file = await indexFile()
+    const historical = session("history", "project-A", "/repo/main", 10)
+    let source = [
+      message("h1", "history", "assistant", [textPart("part-1", "history", "h1", "oldMessageNeedle() evidence")], 1),
+    ]
+    const instance = await plugin({
+      file,
+      sessions: [historical],
+      messages: { history: async () => ({ data: source }) },
+    })
+
+    const before = currentOutput("current-a", "Recall oldMessageNeedle()")
+    await instance.hooks["experimental.chat.messages.transform"]!({}, before.output as any)
+    expect(injected(before.current)[0]?.text).toContain("oldMessageNeedle()")
+
+    source = [
+      message("h1", "history", "assistant", [textPart("part-1", "history", "h1", "newMessageNeedle() evidence")], 1),
+    ]
+    await instance.hooks.event!({
+      event: {
+        type: "message.updated",
+        properties: { info: { id: "h1", sessionID: "history", role: "assistant", time: { created: 1 } } },
+      } as any,
+    })
+
+    const oldQuery = currentOutput("current-b", "Recall oldMessageNeedle()")
+    await instance.hooks["experimental.chat.messages.transform"]!({}, oldQuery.output as any)
+    expect(injected(oldQuery.current)).toHaveLength(0)
+
+    const newQuery = currentOutput("current-c", "Recall newMessageNeedle()")
+    await instance.hooks["experimental.chat.messages.transform"]!({}, newQuery.output as any)
+    expect(injected(newQuery.current)[0]?.text).toContain("newMessageNeedle()")
+  })
+
+  test("dirty transcript refetch failure keeps stale evidence unavailable", async () => {
+    const file = await indexFile()
+    const historical = session("history", "project-A", "/repo/main", 10)
+    let fail = false
+    const instance = await plugin({
+      file,
+      sessions: [historical],
+      messages: {
+        history: async () => {
+          if (fail) throw new Error("raw transcript unavailable")
+          return {
+            data: [
+              message("h1", "history", "assistant", [textPart("part-1", "history", "h1", "dirtyFailureNeedle() evidence")], 1),
+            ],
+          }
+        },
+      },
+    })
+
+    const before = currentOutput("current-a", "Recall dirtyFailureNeedle()")
+    await instance.hooks["experimental.chat.messages.transform"]!({}, before.output as any)
+    expect(injected(before.current)[0]?.text).toContain("dirtyFailureNeedle()")
+
+    fail = true
+    await instance.hooks.event!({
+      event: {
+        type: "message.part.removed",
+        properties: { sessionID: "history", messageID: "h1", partID: "part-1" },
+      } as any,
+    })
+
+    const after = currentOutput("current-b", "Recall dirtyFailureNeedle()")
+    await instance.hooks["experimental.chat.messages.transform"]!({}, after.output as any)
+    expect(injected(after.current)).toHaveLength(0)
+  })
+
+  test("independent plugin instance verifies selected stale evidence against raw Kilo transcript", async () => {
+    const file = await indexFile()
+    const historical = session("history", "project-A", "/repo/main", 10)
+    const first = await plugin({
+      file,
+      sessions: [historical],
+      messages: {
+        history: [
+          message("h1", "history", "assistant", [textPart("part-1", "history", "h1", "crossProcessOldNeedle() evidence")], 1),
+        ],
+      },
+    })
+    const initial = currentOutput("current-a", "Recall crossProcessOldNeedle()")
+    await first.hooks["experimental.chat.messages.transform"]!({}, initial.output as any)
+    expect(injected(initial.current)[0]?.text).toContain("crossProcessOldNeedle()")
+
+    const second = await plugin({
+      file,
+      sessions: [historical],
+      messages: {
+        history: [
+          message("h1", "history", "assistant", [textPart("part-1", "history", "h1", "crossProcessNewNeedle() evidence")], 1),
+        ],
+      },
+    })
+    const staleQuery = currentOutput("current-b", "Recall crossProcessOldNeedle()")
+    await second.hooks["experimental.chat.messages.transform"]!({}, staleQuery.output as any)
+    expect(second.calls.messages).toContain("history")
+    expect(injected(staleQuery.current)).toHaveLength(0)
+  })
+
   test("persistent index reuses unchanged sessions across plugin instances", async () => {
     const file = await indexFile()
     const historical = session("history", "project-A", "/repo/main", 10)
