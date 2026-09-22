@@ -472,9 +472,11 @@ export function createZeroMem(options: FactoryOptions = {}): Plugin {
           type === "message.part.removed" ||
           type === "message.part.updated"
         ) {
-          dirtySessions.add(sessionID)
-          index.remove(sessionID)
-          await index.save().catch(() => false)
+          if (!dirtySessions.has(sessionID)) {
+            dirtySessions.add(sessionID)
+            index.remove(sessionID)
+            await index.save().catch(() => false)
+          }
           return
         }
 
