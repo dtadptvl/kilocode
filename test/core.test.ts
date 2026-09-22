@@ -2,7 +2,9 @@ import { describe, expect, test } from "bun:test"
 import {
   MAX_EVIDENCE_CHARS,
   MAX_EVIDENCE_ITEMS,
+  MAX_TRACE_TEXT_CHARS,
   bridgeQueries,
+  clipRawText,
   close,
   entities,
   rank,
@@ -81,6 +83,17 @@ describe("retrieval core", () => {
     const out = render(rows)
     expect(rows.slice(0, MAX_EVIDENCE_ITEMS)).toHaveLength(MAX_EVIDENCE_ITEMS)
     expect(out.length).toBeLessThanOrEqual(MAX_EVIDENCE_CHARS)
+  })
+
+  test("raw trace clipping is deterministic and keeps bounded prefix plus suffix", () => {
+    const input = "A".repeat(MAX_TRACE_TEXT_CHARS) + "MIDDLE" + "Z".repeat(MAX_TRACE_TEXT_CHARS)
+    const first = clipRawText(input)
+    const second = clipRawText(input)
+    expect(first).toBe(second)
+    expect(first.length).toBeLessThanOrEqual(MAX_TRACE_TEXT_CHARS)
+    expect(first.startsWith("A")).toBe(true)
+    expect(first.endsWith("Z")).toBe(true)
+    expect(first).toContain("[truncated]")
   })
 
   test("historical markup remains inert untrusted evidence", () => {
