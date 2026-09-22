@@ -185,6 +185,38 @@ describe("persistent derived index", () => {
     expect((await stat(file)).size).toBeLessThanOrEqual(6_000)
   })
 
+  test("authoritative reconciliation shrinks historical family project IDs", async () => {
+    const file = await tempFile()
+    const store = new PersistentIndex(file, { maxStoreBytes: 2_000 })
+    await store.load()
+
+    const historical = Array.from({ length: 500 }, (_, index) => "historical-project-" + index)
+    store.reconcileFamily(historical, new Set(), false, 10)
+    store.reconcileFamily(["project-current"], new Set(), true, 20)
+    expect(await store.save()).toBe(true)
+
+    const parsed = JSON.parse(await readFile(file, "utf8"))
+    const families = Object.values(parsed.families) as Array<{ projectIDs: string[] }>
+    expect((await stat(file)).size).toBeLessThanOrEqual(2_000)
+    expect(families.every((family) => family.projectIDs.length <= 1)).toBe(true)
+    if (families.length) expect(families[0].projectIDs).toEqual(["project-current"])
+  })
+
+  test("absolute store byte cap also evicts oversized family metadata with no sessions", async () => {
+    const file = await tempFile()
+    const store = new PersistentIndex(file, { maxStoreBytes: 700, maxFamilies: 50 })
+    await store.load()
+
+    store.reconcileFamily(
+      Array.from({ length: 2_000 }, (_, index) => "project-" + index + "-" + "x".repeat(20)),
+      new Set(),
+      false,
+      10,
+    )
+    expect(await store.save()).toBe(true)
+    expect((await stat(file)).size).toBeLessThanOrEqual(700)
+  })
+
   test("corrupted index is quarantined and recreated fail-open", async () => {
     const file = await tempFile()
     await writeFile(file, "{not-json", "utf8")
@@ -201,10 +233,14 @@ describe("persistent derived index", () => {
     expect(parsed.sessions.s.traces[0].text).toBe("recovered")
   })
 
-  test("migrates existing v2 index from legacy filename into version-neutral file", async () => {
+  test("migrates v2 data through current clipping, session bounds, entities and lookup rebuild", async () => {
     const file = await tempFile("zero-mem-index.json")
     const legacy = path.join(path.dirname(file), "zero-mem-index-v1.json")
-    const oldTrace = trace("old-part", "legacyNeedle", { sessionID: "old", messageID: "old-message" })
+    const oversized = trace("old-part", "legacyNeedle() " + "🙂".repeat(MAX_TRACE_TEXT_CHARS * 3), {
+      sessionID: "old",
+      messageID: "old-message",
+      entities: ["STALE_ENTITY_SHOULD_DISAPPEAR"],
+    })
     await writeFile(
       legacy,
       JSON.stringify({
@@ -218,8 +254,8 @@ describe("persistent derived index", () => {
                 directory: "/repo",
                 updated: 7,
                 fingerprint: "old:v:7",
-                traces: [oldTrace],
-                lookup: {},
+                traces: [oversized],
+                lookup: { stale: [0] },
               },
             },
           },
@@ -228,9 +264,17 @@ describe("persistent derived index", () => {
       "utf8",
     )
 
-    const store = new PersistentIndex(file, { legacyFile: legacy })
+    const store = new PersistentIndex(file, { legacyFile: legacy, maxSessionBytes: 4_000 })
     await store.load()
-    expect(store.session("old")?.traces[0]?.text).toBe("legacyNeedle")
+    const migrated = store.session("old")!
+    expect(migrated.traces[0].text.length).toBeLessThanOrEqual(MAX_TRACE_TEXT_CHARS)
+    expect(utf8Bytes(migrated.traces[0].text)).toBeLessThanOrEqual(MAX_TRACE_TEXT_BYTES)
+    expect(migrated.traces.reduce((sum, item) => sum + utf8Bytes(JSON.stringify(item)), 0)).toBeLessThanOrEqual(4_000)
+    expect(migrated.traces[0].entities).toContain("legacyNeedle()")
+    expect(migrated.traces[0].entities).not.toContain("STALE_ENTITY_SHOULD_DISAPPEAR")
+    expect(migrated.lookup.stale).toBeUndefined()
+    expect(store.candidates(migrated.familyID, "legacyNeedle()").some((item) => item.partID === "old-part")).toBe(true)
+
     store.reconcileFamily(["p"], new Set(["old"]), true, 8)
     expect(await store.save()).toBe(true)
 
