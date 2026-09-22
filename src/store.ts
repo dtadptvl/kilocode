@@ -113,18 +113,19 @@ function buildLookup(traces: Trace[]) {
   return lookup
 }
 
-function migrateV2(value: V2Index): IndexFile {
+function migrateV2(value: V2Index, maxSessionBytes: number): IndexFile {
   const data = empty()
   for (const [projectID, project] of Object.entries(value.projects)) {
     const id = familyID([projectID])
     data.families[id] = { id, projectIDs: [projectID], updated: 0 }
     for (const raw of Object.values(project.sessions ?? {})) {
+      const traces = boundTraces(Array.isArray(raw.traces) ? raw.traces : [], maxSessionBytes)
       const session: IndexedSession = {
         ...raw,
         familyID: id,
         projectID: raw.projectID || projectID,
-        traces: Array.isArray(raw.traces) ? raw.traces : [],
-        lookup: record(raw.lookup) ? (raw.lookup as Record<string, number[]>) : {},
+        traces,
+        lookup: buildLookup(traces),
       }
       data.sessions[session.sessionID] = session
       data.families[id].updated = Math.max(data.families[id].updated, session.updated || 0)
@@ -226,6 +227,14 @@ function applyMutation(data: IndexFile, mutation: Mutation, maxSessionBytes: num
       if (session.updated > mutation.snapshotAt) continue
       delete data.sessions[sessionID]
     }
+
+    const retainedProjectIDs = Object.values(data.sessions)
+      .filter((session) => session.familyID === id)
+      .map((session) => session.projectID)
+      .filter(Boolean)
+    data.families[id].projectIDs = [
+      ...new Set([...mutation.projectIDs.filter(Boolean), ...retainedProjectIDs]),
+    ].sort()
     return
   }
 
@@ -275,6 +284,18 @@ function prune(data: IndexFile, options: Required<Pick<StoreOptions, "maxFamilie
     if (Object.keys(data.families).length <= options.maxFamilies) break
     delete data.families[family.id]
   }
+
+  // MAX_STORE_BYTES is absolute, including family metadata. If sessions are
+  // already gone, evict the oldest remaining family metadata until the file fits.
+  while (utf8Bytes(JSON.stringify(data)) > options.maxStoreBytes) {
+    const family = Object.values(data.families)
+      .sort((a, b) => a.updated - b.updated || b.id.localeCompare(a.id))[0]
+    if (!family) break
+    delete data.families[family.id]
+    for (const [sessionID, session] of Object.entries(data.sessions)) {
+      if (session.familyID === family.id) delete data.sessions[sessionID]
+    }
+  }
 }
 
 function delay(ms: number) {
@@ -310,7 +331,7 @@ export class PersistentIndex {
   private async decode(file: string) {
     const parsed = JSON.parse(await readFile(file, "utf8")) as unknown
     if (validV3(parsed)) return parsed
-    if (validV2(parsed)) return migrateV2(parsed)
+    if (validV2(parsed)) return migrateV2(parsed, this.maxSessionBytes)
     throw new Error("unsupported or invalid index schema")
   }
 
@@ -376,6 +397,18 @@ export class PersistentIndex {
 
   remove(sessionID: string) {
     this.local({ kind: "remove", sessionID })
+  }
+
+  async refresh() {
+    await this.load()
+    const merged = await this.disk()
+    for (const mutation of this.pending) applyMutation(merged, mutation, this.maxSessionBytes)
+    prune(merged, {
+      maxFamilies: this.maxFamilies,
+      maxSessions: this.maxSessions,
+      maxStoreBytes: this.maxStoreBytes,
+    })
+    this.data = merged
   }
 
   session(sessionID: string) {
