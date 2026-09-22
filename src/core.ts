@@ -6,6 +6,15 @@ export const TOOL_TEXT_MAX = 2400
 export const MAX_INDEX_SESSIONS = 500
 export const MAX_TRACES_PER_SESSION = 800
 export const MAX_INGEST_PER_TURN = 8
+export const COLD_START_EXTRA_INGEST = 8
+export const FAMILY_LIST_LIMIT = 5000
+export const MAX_TRACE_TEXT_CHARS = 8000
+export const MAX_SESSION_INDEX_BYTES = 256 * 1024
+export const MAX_INDEX_FAMILIES = 32
+export const MAX_STORE_BYTES = 24 * 1024 * 1024
+export const INDEX_LOCK_TIMEOUT_MS = 750
+export const INDEX_LOCK_STALE_MS = 30_000
+export const INDEX_LOCK_POLL_MS = 50
 export const RETRIEVAL_TIMEOUT_MS = 1800
 export const COMPACTING_TTL_MS = 5 * 60_000
 
@@ -183,6 +192,20 @@ export function close(seeds: ReturnType<typeof rank>, bySession: Map<string, Tra
   return out
     .sort((a, b) => b.score - a.score || b.timestamp - a.timestamp)
     .slice(0, MAX_EVIDENCE_ITEMS)
+}
+
+export function utf8Bytes(value: string) {
+  return new TextEncoder().encode(value).length
+}
+
+export function clipRawText(value: string, max = MAX_TRACE_TEXT_CHARS) {
+  const text = value.replace(/\u0000/g, "").trim()
+  if (text.length <= max) return text
+  const marker = "\n…[truncated]…\n"
+  const usable = Math.max(0, max - marker.length)
+  const head = Math.floor(usable * 0.62)
+  const tail = usable - head
+  return text.slice(0, head).trimEnd() + marker + text.slice(-tail).trimStart()
 }
 
 export function clipToolText(value: string, max = TOOL_TEXT_MAX) {

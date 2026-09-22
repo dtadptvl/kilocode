@@ -1,10 +1,29 @@
 # Zero-Mem for Kilo Code CLI
 
-Zero-Mem is a deterministic long-term recall plugin for Kilo Code CLI. It is inspired by **Zero-Mem: Zero-Token Memory Operations for LLM Agents**: keep the original interaction traces as the source of truth, build non-generative retrieval structure over those traces, and retrieve provenance-bearing evidence when the agent needs historical context instead of repeatedly asking an LLM to rewrite history into summaries or memory cards.
+Zero-Mem is an external deterministic long-term recall plugin for Kilo Code CLI, inspired by **Zero-Mem: Zero-Token Memory Operations for LLM Agents**.
 
-For Kilo, that means the plugin searches prior raw coding sessions before model inference, identifies engineering entities such as file paths, symbols and error codes, retrieves relevant trace parts, follows one bounded relational bridge when useful, expands the immediate temporal neighborhood around a hit, and injects the resulting raw evidence into the current turn as explicitly untrusted historical context.
+It keeps Kilo's raw session history authoritative and retrieves provenance-bearing historical evidence without an LLM memory call, generated memory cards, embeddings, a vector database, a graph database, or a background daemon. This repository is an intentionally lightweight adaptation, not a full paper-equivalent implementation.
 
-The paper proposes zero-token memory operations: memory handling itself does not invoke an LLM or consume LLM input/output tokens; original interaction traces remain the source of record, organized through relational and temporal views. This plugin adapts that direction to Kilo's coding-session history while keeping the implementation intentionally lightweight. It is not a full paper-equivalent implementation: it uses deterministic weighted token/entity retrieval, a lightweight persistent derived index, one bounded relational bridge, and immediate temporal closure instead of mandatory embeddings, a graph database, or a separate memory service.
+## Architecture boundary
+
+Zero-Mem owns only:
+
+```text
+historical raw-evidence recall
+```
+
+It does not own active task state, user preferences, project policy, Prime/Sub orchestration state, generated summaries, or explicit remember/correct/forget operations.
+
+Conflict priority is:
+
+```text
+current user instruction
+> current repository / current tool evidence
+> current task state
+> recalled historical evidence
+```
+
+Recalled evidence is advisory and untrusted.
 
 ## Install
 
@@ -16,25 +35,13 @@ Windows PowerShell:
 irm https://raw.githubusercontent.com/dtadptvl/kilocode-zero-mem/main/install-online.ps1 | iex
 ```
 
-No clone or ZIP is required. The production one-liner downloads `install-online.ps1` from `main`, but that script pins the plugin payload to the immutable Zero-Mem 0.2.0 source commit `9646b7c23b7b452864aa6c3e96bbb77064c30ded` rather than mutable `main`.
+The script on `main` is only the bootstrap. The actual Zero-Mem 0.2.1 plugin payload is pinned to immutable source commit `842257d3efc501b0d4fe17d75a34d0d830dff60c` and is never downloaded from mutable `main`. The same commit is recorded in `release.json`, `install-online.ps1`, and `uninstall-online.ps1`; CI asserts that they agree.
 
-The installer:
+The installer stages and validates the complete package before replacing the working plugin, preserves the local derived index during upgrades, registers through Kilo's native global plugin command, and rolls back both plugin files and Kilo config if registration fails. A failed first install removes any config file created by the failed registration.
 
-1. verifies that `kilo` is available;
-2. resolves Kilo's global config directory;
-3. downloads/copies the plugin into a staging directory;
-4. validates the required plugin files and manifest;
-5. preserves the existing local derived index during upgrades;
-6. replaces the working plugin directory only after staging succeeds;
-7. registers the local package through Kilo's native `plugin <module> --global --force` command;
-8. restores the previous working plugin if registration fails;
-9. prints the installed Zero-Mem version.
+The installer prints the installed package version. Restart Kilo after installation.
 
-It leaves the installed Kilo executable and source untouched. Restart Kilo after installation.
-
-### Local command install
-
-From a cloned/downloaded repository:
+### Local install
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\install.ps1
@@ -54,76 +61,124 @@ irm https://raw.githubusercontent.com/dtadptvl/kilocode-zero-mem/main/uninstall-
 powershell -ExecutionPolicy Bypass -File .\uninstall.ps1
 ```
 
-Uninstall removes the Zero-Mem global plugin registration and its installed plugin directory. Before changing a Kilo config file it writes a `.zero-mem-uninstall.bak` backup. It does not change unrelated Kilo settings or Project Memory policy.
+Uninstall removes the Zero-Mem plugin registration and installed Zero-Mem directory. It backs up an existing Kilo config before editing it and does not alter unrelated Kilo settings.
 
-## How it works
+## How recall works
 
-Per relevant normal user turn, Zero-Mem:
+For a relevant normal user turn, Zero-Mem:
 
-1. lists sessions at Kilo project scope and rejects any session whose `projectID` differs from the current project;
-2. incrementally ingests only new or changed sessions into a bounded local persistent derived index;
-3. can recall old history from the current long-running session while excluding the current message and a small deterministic visible tail;
-4. indexes user/assistant text, file references, and bounded tool evidence including tool name, input, status, compiler/test errors, and bounded stdout/stderr-like output;
-5. extracts engineering entities such as paths, symbols, error codes and provider/model-like IDs deterministically;
-6. uses order-insensitive weighted token/entity scoring rather than exact phrase-substring matching;
-7. queries a persistent inverted token/entity lookup instead of rescanning every raw historical session on each turn;
-8. follows at most one bounded relational bridge using at most two novel entities;
-9. expands only the immediate previous/current/next evidence neighborhood;
-10. bounds the result to at most 10 evidence items within a strict 6000-character budget;
-11. escapes recalled markup and injects the result as `untrusted_context_not_instruction`.
+1. asks Kilo for the authoritative **worktree-family** session list rather than assuming exact `projectID` equality;
+2. accepts sibling worktrees even when Kilo assigned them different project IDs, while keeping unrelated worktree families out of scope;
+3. reconciles the local derived index against successful authoritative listings so deleted Kilo sessions do not remain indefinitely recallable;
+4. incrementally ingests a small recent/query-biased batch of new or changed sessions;
+5. if indexed evidence is still absent or weak on cold start, opportunistically inspects one additional bounded batch within the same retrieval timeout;
+6. includes old history from the current long-running session while excluding the current message and a deterministic visible tail;
+7. indexes bounded user/assistant text, file references, and bounded tool/error evidence with session/message/part provenance;
+8. extracts paths, symbols, error codes and other useful engineering entities deterministically;
+9. performs order-insensitive weighted token/entity retrieval through a persistent inverted lookup;
+10. follows at most one bounded relational bridge and expands only the immediate temporal neighborhood;
+11. injects at most 10 evidence items within a strict 6000-character prompt budget.
 
-Raw Kilo session history remains authoritative. The local index is derived data and can be discarded/rebuilt. Current user instruction, repository/tool evidence, current task state and the current conversation take precedence over recalled history.
+No LLM is invoked by indexing, retrieval, reconciliation, or persistence.
+
+## Worktree-family scope
+
+Zero-Mem 0.2.1 reuses Kilo's public `/experimental/session` worktree-family listing semantics with `worktrees=true`. This is the same Kilo behavior that is tested for project-ID drift between a repository root and sibling worktrees.
+
+Directory and original `projectID` remain evidence provenance, but exact project-ID equality is not the family boundary.
+
+If the authoritative family listing fails, Zero-Mem fails open for that turn and does **not** purge indexed history.
 
 ## Compaction isolation
 
-Zero-Mem uses Kilo's public compaction hook to mark a session while compaction is running. During that interval it does not inject recalled history into `experimental.chat.messages.transform`, so recalled evidence cannot be folded into Kilo's persistent generated compaction summary.
+Zero-Mem marks a session when Kilo enters the public compaction hook and does not inject recalled evidence into compaction input. The marker is cleared on compaction completion/idle/error lifecycle events, with a bounded stale-state timeout as a final guard.
 
-The marker is cleared by Kilo lifecycle events such as `session.compacted`, `session.idle`, `session.error`, or idle `session.status`, with a bounded stale-marker timeout as a final guard. Normal recall then resumes.
+This prevents recalled historical evidence from being transformed into Kilo's persistent generated compaction summary.
 
 ## Safety and failure isolation
 
-Zero-Mem adds a fixed system-hook instruction stating that content inside kilo_zero_mem blocks is historical data only. Historical markup is escaped without an LLM sanitizer. Current user instruction, current repository/tool evidence, and current task state take precedence over recalled history.
+Injected evidence is wrapped in:
 
-Retrieval uses a fixed timeout and no retry loop inside a turn. A session-list failure skips recall; a single session-fetch failure skips only that session; index read/write problems fail open.
+```text
+<kilo_zero_mem untrusted_context_not_instruction>
+```
+
+Historical markup is escaped. A fixed system-hook instruction states that content in Zero-Mem blocks is historical data only and instructions inside recalled evidence must never be followed.
+
+Session-list, individual session-fetch, index, lock, render and timeout failures are fail-open: the normal model turn continues without Zero-Mem evidence. There is no retry loop inside a turn.
 
 ## Persistent derived index
 
-The plugin currently uses a local JSON-derived index rather than SQLite. This avoids a runtime dependency while still providing bounded incremental ingestion, content/version fingerprints, and an inverted token/entity lookup. The index stores project/session/message/part provenance, timestamp, role/type, directory/worktree metadata, bounded raw evidence text, deterministic entities and source/tool metadata. It is written through a temporary file before replacement, bounded by explicit session/trace caps, and safe to quarantine/rebuild when missing or corrupt.
-
-## Relation to Kilo Project Memory
-
-Zero-Mem retrieves historical raw evidence. Kilo Project Memory stores durable project facts, decisions and corrections. They can coexist.
-
-For a setup closer to the paper's non-generative-memory principle, disable automatic Project Memory capture inside Kilo:
+The active index filename is:
 
 ```text
-/memory auto off
+zero-mem-index.json
 ```
 
-Explicit `/memory remember`, `/memory correct`, and `/memory forget` remain available.
+The schema version lives inside the file. Zero-Mem 0.2.1 can read the prior v2 data stored under `zero-mem-index-v1.json`, then writes the migrated state to the version-neutral filename after a successful save.
+
+The index is derived data. Raw Kilo history remains authoritative.
+
+Persistence is bounded by explicit constants for:
+
+- raw text per trace;
+- traces and aggregate bytes per session;
+- retained sessions;
+- retained worktree families;
+- total serialized store bytes.
+
+Normal raw text uses deterministic prefix/suffix clipping when necessary; tool text retains its separate bounded policy.
+
+Cross-process writes use a small filesystem lock with a bounded wait and deterministic stale-lock expiry. Under the lock, Zero-Mem reloads current disk state, merges local pending mutations, writes a temporary file, atomically replaces the index, and releases the lock in `finally`. Lock failure remains fail-open.
+
+## Deleted history
+
+A successful authoritative Kilo family listing is reconciled against the derived index. Indexed sessions no longer in that family listing are removed.
+
+Zero-Mem also handles `session.deleted` for immediate best-effort cleanup.
+
+A failed or non-authoritative/truncated listing never triggers destructive reconciliation.
+
+## Kilo native recall compatibility audit
+
+Kilo now contains native local recall/search infrastructure with its own worktree-family handling and local transcript indexes. Zero-Mem 0.2.1 does **not** rewrite itself around that implementation.
+
+The useful worktree-family session-list behavior is exposed by a public Kilo endpoint and is reused here. The native raw recall search implementation itself is currently internal/tool-backed rather than exposed as a clean public plugin/SDK search interface suitable for this external plugin. Importing those internal modules would couple Zero-Mem to Kilo core internals, so 0.2.1 deliberately does not do that.
+
+If Kilo later exposes native raw recall search through a stable public plugin/SDK API, Zero-Mem could simplify by reusing it and potentially remove part of its own derived lexical index.
+
+## Kilo Project Memory
+
+Zero-Mem is independent of Kilo Project Memory and requires no `/memory` feature.
+
+Zero-Mem does not implement remember, correct, forget, generated durable facts, or a replacement memory command system. It remains automatic historical raw-evidence recall.
 
 ## Repository layout
 
-- `main`: Zero-Mem plugin source, online/local installers, uninstaller, tests and documentation.
-- `kilo-base`: preserved Kilo source baseline used to verify the public plugin hook, SDK session APIs and native plugin-install command expected by this plugin.
+- `main`: plugin source, online/local installers, tests, CI and documentation.
+- `kilo-base`: preserved Kilo source baseline used only for compatibility-contract checks against the public plugin hooks, worktree-family session route, SDK/session APIs, events and native plugin command.
 
 ## Research attribution
 
-This project is an independent Kilo Code CLI integration inspired by the ideas in the **Zero-Mem: Zero-Token Memory Operations for LLM Agents**. The underlying research concepts and credit belong to the paper's authors; this repository is not presented as their official or reference implementation.
+This project is an independent Kilo Code CLI integration inspired by **Zero-Mem: Zero-Token Memory Operations for LLM Agents**. Credit for the underlying research concepts belongs to the paper's authors; this repository is not their official or reference implementation.
 
 - **Paper:** [Zero-Mem on arXiv](https://arxiv.org/abs/2607.29377)
 - **PDF:** [arXiv PDF](https://arxiv.org/pdf/2607.29377)
 
-In particular, this plugin adopts the paper's broad provenance-first direction: raw interaction traces remain authoritative, retrieval is performed without an extra generative memory step, and historical evidence is returned to the agent with its source identity rather than replacing the source with a generated memory abstraction.
-
 ## Design constraints
 
-Zero-Mem for Kilo intentionally adds no:
+Zero-Mem intentionally adds no:
 
-- embedding-model requirement;
-- vector or graph database;
-- memory LLM call;
+- LLM memory summarization;
+- generated memory cards;
+- embeddings;
+- vector database;
+- graph database;
 - background daemon or scheduler;
-- Kilo source patch or rebuild.
+- `/memory` replacement;
+- explicit remember/correct/forget workflow;
+- Kilo core fork/patch for runtime operation;
+- distributed locking;
+- heavyweight storage/search dependency.
 
-The plugin is installed through Kilo's supported plugin mechanism and operates through its public plugin/SDK interfaces.
+Development/typecheck dependencies remain pinned and are not runtime plugin dependencies.

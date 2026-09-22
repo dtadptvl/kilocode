@@ -44,7 +44,27 @@ exit 1
   $cfg = Get-Content -Raw (Join-Path $config 'opencode.json')
   if ($cfg -match 'zero-mem') { throw 'uninstall did not remove plugin registration' }
 
+  # Failed first install must leave no plugin or newly-created config residue.
   $pluginRoot = Join-Path $config 'zero-mem'
+  Remove-Item -Recurse -Force -ErrorAction SilentlyContinue -LiteralPath $pluginRoot
+  foreach ($name in @('opencode.json', 'opencode.jsonc')) {
+    Remove-Item -Force -ErrorAction SilentlyContinue -LiteralPath (Join-Path $config $name)
+  }
+  $env:ZERO_MEM_SMOKE_FAIL_PLUGIN = '1'
+  $firstFailed = $false
+  try {
+    & (Join-Path $RepoRoot 'install.ps1') -SourceRoot $RepoRoot
+  } catch {
+    $firstFailed = $true
+  }
+  if (-not $firstFailed) { throw 'expected first-install registration failure was not surfaced' }
+  if (Test-Path -LiteralPath $pluginRoot) { throw 'failed first install left plugin directory behind' }
+  foreach ($name in @('opencode.json', 'opencode.jsonc')) {
+    if (Test-Path -LiteralPath (Join-Path $config $name)) { throw "failed first install left $name behind" }
+  }
+  Remove-Item Env:ZERO_MEM_SMOKE_FAIL_PLUGIN -ErrorAction SilentlyContinue
+
+  # Failed update must restore the prior working plugin and exact prior config.
   New-Item -ItemType Directory -Force -Path $pluginRoot | Out-Null
   Set-Content -LiteralPath (Join-Path $pluginRoot 'old-marker.txt') -Value 'old-working-installation'
   Set-Content -Encoding UTF8 -LiteralPath (Join-Path $config 'opencode.json') -Value '{"plugin":["baseline-registration"]}'

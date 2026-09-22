@@ -50,9 +50,14 @@ jobs:
           grep -q '"experimental.chat.messages.transform"' kilo/packages/plugin/src/index.ts
           grep -q '"experimental.chat.system.transform"' kilo/packages/plugin/src/index.ts
           grep -q '"experimental.session.compacting"' kilo/packages/plugin/src/index.ts
+          grep -q 'serverUrl: URL' kilo/packages/plugin/src/index.ts
           grep -q 'session.compacted' kilo/packages/sdk/js/src/gen/types.gen.ts
-          grep -q 'public list<' kilo/packages/sdk/js/src/gen/sdk.gen.ts
+          grep -q 'session.deleted' kilo/packages/sdk/js/src/gen/types.gen.ts
           grep -q 'public messages<' kilo/packages/sdk/js/src/gen/sdk.gen.ts
-          grep -q 'scope: Schema.optional(Schema.Literals(\["project"\]))' kilo/packages/opencode/src/server/routes/instance/httpapi/groups/session.ts
+          grep -q 'projectID: Schema.optional(Schema.String)' kilo/packages/opencode/src/server/routes/instance/httpapi/groups/experimental.ts
+          grep -q 'worktrees: Schema.optional(QueryBoolean)' kilo/packages/opencode/src/server/routes/instance/httpapi/groups/experimental.ts
+          grep -q 'WorktreeFamily.list()' kilo/packages/opencode/src/server/routes/instance/httpapi/handlers/experimental.ts
+          grep -q 'url: "/experimental/session"' kilo/packages/sdk/js/src/v2/gen/sdk.gen.ts
+          grep -q 'filters sessions by repo worktree family even when project IDs drift' kilo/packages/opencode/test/server/experimental-session-list.test.ts
           grep -q 'command: "plugin <module>"' kilo/packages/opencode/src/cli/cmd/plug.ts
           grep -q 'type: "tool"' kilo/packages/sdk/js/src/gen/types.gen.ts
