@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { mkdtemp, rm } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
+import { MAX_INGEST_PER_TURN } from "../src/core"
 import { createZeroMem } from "../src/index"
 
 const temps: string[] = []
@@ -12,7 +13,7 @@ afterEach(async () => {
 async function indexFile() {
   const dir = await mkdtemp(path.join(os.tmpdir(), "zero-mem-test-"))
   temps.push(dir)
-  return path.join(dir, "index.json")
+  return path.join(dir, "zero-mem-index.json")
 }
 
 function textPart(id: string, sessionID: string, messageID: string, text: string, extra: Record<string, unknown> = {}) {
@@ -33,8 +34,14 @@ function message(
   return { info: { id, sessionID, role, time: { created } }, parts }
 }
 
-function session(id: string, projectID: string, directory: string, updated: number) {
-  return { id, projectID, directory, title: id, version: "test", time: { created: 1, updated } }
+function session(
+  id: string,
+  projectID: string,
+  directory: string,
+  updated: number,
+  title = id,
+) {
+  return { id, projectID, directory, title, version: "test", time: { created: 1, updated } }
 }
 
 function currentOutput(sessionID: string, text: string, extraMessages: any[] = []) {
@@ -49,42 +56,50 @@ function currentOutput(sessionID: string, text: string, extraMessages: any[] = [
 }
 
 async function plugin(input: {
-  sessions: any[]
-  messages: Record<string, any[] | Error | (() => Promise<any>)>
+  sessions?: any[]
+  messages?: Record<string, any[] | Error | (() => Promise<any>)>
+  familyError?: Error
+  familyList?: () => Promise<any[]>
   projectID?: string
+  projectWorktree?: string
   directory?: string
-  listError?: Error
   timeoutMs?: number
   file?: string
 }) {
-  const calls = { list: 0, messages: [] as string[], listQuery: undefined as any }
+  const calls = { familyList: 0, messages: [] as string[] }
+  const messages = input.messages ?? {}
   const client = {
     session: {
-      list: async (options: any) => {
-        calls.list++
-        calls.listQuery = options?.query
-        if (input.listError) throw input.listError
-        return { data: input.sessions }
-      },
       messages: async ({ path: requestPath }: any) => {
         calls.messages.push(requestPath.id)
-        const value = input.messages[requestPath.id]
+        const value = messages[requestPath.id]
         if (typeof value === "function") return value()
         if (value instanceof Error) throw value
         return { data: value ?? [] }
       },
+      list: async () => ({ data: input.sessions ?? [] }),
     },
   }
 
   const factory = createZeroMem({
     indexFile: input.file ?? (await indexFile()),
     timeoutMs: input.timeoutMs ?? 500,
+    familyList: async () => {
+      calls.familyList++
+      if (input.familyError) throw input.familyError
+      if (input.familyList) return input.familyList()
+      return input.sessions ?? []
+    },
   })
   const hooks = await factory({
     client,
     directory: input.directory ?? "/repo/main",
     worktree: input.directory ?? "/repo/main",
-    project: { id: input.projectID ?? "project-1", worktree: "/repo/main", time: { created: 1 } },
+    project: {
+      id: input.projectID ?? "project-A",
+      worktree: input.projectWorktree ?? "/repo/main",
+      time: { created: 1 },
+    },
   } as any)
   return { hooks, calls }
 }
@@ -97,7 +112,7 @@ function injected(current: any) {
 
 describe("plugin behavior", () => {
   test("normal historical recall injects once and adds the system safety rule", async () => {
-    const historical = session("history", "project-1", "/repo/main", 10)
+    const historical = session("history", "project-A", "/repo/main", 10)
     const { hooks } = await plugin({
       sessions: [historical],
       messages: {
@@ -124,8 +139,139 @@ describe("plugin behavior", () => {
     expect(system.system.join("\n")).toContain("historical data only")
   })
 
+  test("sibling worktrees with different project IDs recall both directions and exclude unrelated family", async () => {
+    const file = await indexFile()
+    const prime = session("prime-history", "project-A", "/repo/main", 30)
+    const sub = session("sub-history", "project-B", "/repo/worktree-sub", 20)
+    const unrelated = session("unrelated", "project-C", "/unrelated/repo", 40)
+    const family = [prime, sub]
+    const messages = {
+      "prime-history": [
+        message("p1", "prime-history", "assistant", [textPart("p1p", "prime-history", "p1", "primeNeedle() evidence")], 1),
+      ],
+      "sub-history": [
+        message("s1", "sub-history", "assistant", [textPart("s1p", "sub-history", "s1", "subNeedle() evidence")], 1),
+      ],
+      unrelated: [
+        message("u1", "unrelated", "assistant", [textPart("u1p", "unrelated", "u1", "unrelatedNeedle() secret")], 1),
+      ],
+    }
+
+    const primePlugin = await plugin({
+      file,
+      sessions: family,
+      messages,
+      projectID: "project-A",
+      projectWorktree: "/repo/main",
+      directory: "/repo/main",
+    })
+    const fromPrime = currentOutput("prime-current", "Recall subNeedle() unrelatedNeedle()")
+    await primePlugin.hooks["experimental.chat.messages.transform"]!({}, fromPrime.output as any)
+    const primeText = injected(fromPrime.current)[0]?.text ?? ""
+    expect(primeText).toContain("subNeedle()")
+    expect(primeText).not.toContain("unrelatedNeedle()")
+    expect(primePlugin.calls.messages).not.toContain("unrelated")
+
+    const subPlugin = await plugin({
+      file,
+      sessions: family,
+      messages,
+      projectID: "project-B",
+      projectWorktree: "/repo/main",
+      directory: "/repo/worktree-sub",
+    })
+    const fromSub = currentOutput("sub-current", "Recall primeNeedle() unrelatedNeedle()")
+    await subPlugin.hooks["experimental.chat.messages.transform"]!({}, fromSub.output as any)
+    const subText = injected(fromSub.current)[0]?.text ?? ""
+    expect(subText).toContain("primeNeedle()")
+    expect(subText).not.toContain("unrelatedNeedle()")
+    expect(subPlugin.calls.messages).not.toContain("unrelated")
+  })
+
+  test("successful authoritative listing reconciles deleted indexed sessions", async () => {
+    const file = await indexFile()
+    const historical = session("deleted-later", "project-A", "/repo/main", 10)
+    const first = await plugin({
+      file,
+      sessions: [historical],
+      messages: {
+        "deleted-later": [
+          message("d1", "deleted-later", "assistant", [textPart("d1p", "deleted-later", "d1", "deletedNeedle() evidence")], 1),
+        ],
+      },
+    })
+    const one = currentOutput("current-a", "Recall deletedNeedle()")
+    await first.hooks["experimental.chat.messages.transform"]!({}, one.output as any)
+    expect(injected(one.current)[0]?.text).toContain("deletedNeedle()")
+
+    const second = await plugin({ file, sessions: [], messages: {} })
+    const two = currentOutput("current-b", "Recall deletedNeedle()")
+    await second.hooks["experimental.chat.messages.transform"]!({}, two.output as any)
+    expect(injected(two.current)).toHaveLength(0)
+
+    const third = await plugin({ file, sessions: [], messages: {} })
+    const three = currentOutput("current-c", "Recall deletedNeedle()")
+    await third.hooks["experimental.chat.messages.transform"]!({}, three.output as any)
+    expect(injected(three.current)).toHaveLength(0)
+  })
+
+  test("session.list failure does not purge existing index", async () => {
+    const file = await indexFile()
+    const historical = session("history", "project-A", "/repo/main", 10)
+    const first = await plugin({
+      file,
+      sessions: [historical],
+      messages: {
+        history: [
+          message("h1", "history", "assistant", [textPart("h1p", "history", "h1", "survivesListFailure() evidence")], 1),
+        ],
+      },
+    })
+    const one = currentOutput("current-a", "Recall survivesListFailure()")
+    await first.hooks["experimental.chat.messages.transform"]!({}, one.output as any)
+
+    const failed = await plugin({ file, familyError: new Error("offline") })
+    const two = currentOutput("current-b", "Recall survivesListFailure()")
+    await failed.hooks["experimental.chat.messages.transform"]!({}, two.output as any)
+    expect(injected(two.current)).toHaveLength(0)
+
+    const recovered = await plugin({
+      file,
+      sessions: [historical],
+      messages: { history: new Error("unchanged session should not refetch") },
+    })
+    const three = currentOutput("current-c", "Recall survivesListFailure()")
+    await recovered.hooks["experimental.chat.messages.transform"]!({}, three.output as any)
+    expect(recovered.calls.messages).toEqual([])
+    expect(injected(three.current)[0]?.text).toContain("survivesListFailure()")
+  })
+
+  test("session.deleted event removes indexed evidence immediately", async () => {
+    const file = await indexFile()
+    const historical = session("history", "project-A", "/repo/main", 10)
+    const first = await plugin({
+      file,
+      sessions: [historical],
+      messages: {
+        history: [
+          message("h1", "history", "assistant", [textPart("h1p", "history", "h1", "eventDeleteNeedle() evidence")], 1),
+        ],
+      },
+    })
+    const one = currentOutput("current-a", "Recall eventDeleteNeedle()")
+    await first.hooks["experimental.chat.messages.transform"]!({}, one.output as any)
+    await first.hooks.event!({
+      event: { type: "session.deleted", properties: { info: historical } } as any,
+    })
+
+    const second = await plugin({ file, sessions: [], messages: {} })
+    const two = currentOutput("current-b", "Recall eventDeleteNeedle()")
+    await second.hooks["experimental.chat.messages.transform"]!({}, two.output as any)
+    expect(injected(two.current)).toHaveLength(0)
+  })
+
   test("skips compaction and resumes after compaction completes", async () => {
-    const historical = session("history", "project-1", "/repo/main", 10)
+    const historical = session("history", "project-A", "/repo/main", 10)
     const { hooks } = await plugin({
       sessions: [historical],
       messages: {
@@ -145,7 +291,7 @@ describe("plugin behavior", () => {
   })
 
   test("clears compacting state after compaction failure event", async () => {
-    const historical = session("history", "project-1", "/repo/main", 10)
+    const historical = session("history", "project-A", "/repo/main", 10)
     const { hooks } = await plugin({
       sessions: [historical],
       messages: {
@@ -163,47 +309,33 @@ describe("plugin behavior", () => {
     expect(injected(current)).toHaveLength(1)
   })
 
-  test("session.list failure and retrieval timeout fail open", async () => {
-    const listFailure = await plugin({
-      sessions: [],
-      messages: {},
-      listError: new Error("offline"),
-    })
+  test("family listing failure and retrieval timeout fail open", async () => {
+    const listFailure = await plugin({ familyError: new Error("offline") })
     const a = currentOutput("s", "Recall anything useful")
     await expect(listFailure.hooks["experimental.chat.messages.transform"]!({}, a.output as any)).resolves.toBeUndefined()
     expect(injected(a.current)).toHaveLength(0)
 
-    const timeout = await plugin({
-      sessions: [],
-      messages: {},
-      timeoutMs: 15,
-    })
-    ;(timeout as any).hooks // keep typed value live
-    const original = timeout.hooks
-    const hangingClient = {
-      session: {
-        list: async () => new Promise(() => undefined),
-        messages: async () => ({ data: [] }),
-      },
-    }
     const file = await indexFile()
-    const hooks = await createZeroMem({ indexFile: file, timeoutMs: 15 })({
-      client: hangingClient,
+    const hooks = await createZeroMem({
+      indexFile: file,
+      timeoutMs: 15,
+      familyList: async () => new Promise<any[]>(() => undefined),
+    })({
+      client: { session: { messages: async () => ({ data: [] }) } },
       directory: "/repo",
       worktree: "/repo",
-      project: { id: "project-1", worktree: "/repo", time: { created: 1 } },
+      project: { id: "project-A", worktree: "/repo", time: { created: 1 } },
     } as any)
     const b = currentOutput("s", "Recall timeoutNeedle()")
     const start = Date.now()
     await expect(hooks["experimental.chat.messages.transform"]!({}, b.output as any)).resolves.toBeUndefined()
     expect(Date.now() - start).toBeLessThan(250)
     expect(injected(b.current)).toHaveLength(0)
-    expect(original).toBeDefined()
   })
 
   test("one session fetch failure does not block evidence from another session", async () => {
-    const bad = session("bad", "project-1", "/repo/a", 20)
-    const good = session("good", "project-1", "/repo/b", 10)
+    const bad = session("bad", "project-A", "/repo/a", 20)
+    const good = session("good", "project-A", "/repo/b", 10)
     const { hooks } = await plugin({
       sessions: [bad, good],
       messages: {
@@ -219,7 +351,7 @@ describe("plugin behavior", () => {
   })
 
   test("recalls old current-session history but excludes visible recent tail and current message", async () => {
-    const currentSession = session("current", "project-1", "/repo/main", 30)
+    const currentSession = session("current", "project-A", "/repo/main", 30)
     const old = message(
       "old",
       "current",
@@ -246,31 +378,8 @@ describe("plugin behavior", () => {
     expect(text).not.toContain("recentNeedle() already visible")
   })
 
-  test("project scope includes sibling worktrees and isolates unrelated projects", async () => {
-    const sibling = session("sibling", "project-1", "/repo/worktree-sub", 20)
-    const unrelated = session("other", "project-2", "/other", 30)
-    const { hooks, calls } = await plugin({
-      sessions: [unrelated, sibling],
-      messages: {
-        sibling: [
-          message("s1", "sibling", "assistant", [textPart("s1p", "sibling", "s1", "siblingNeedle() evidence")], 1),
-        ],
-        other: [
-          message("o1", "other", "assistant", [textPart("o1p", "other", "o1", "unrelatedNeedle() secret")], 1),
-        ],
-      },
-    })
-    const { current, output } = currentOutput("current", "Recall siblingNeedle() unrelatedNeedle()")
-    await hooks["experimental.chat.messages.transform"]!({}, output as any)
-    const text = injected(current)[0]?.text ?? ""
-    expect(calls.listQuery?.scope).toBe("project")
-    expect(text).toContain("siblingNeedle()")
-    expect(text).not.toContain("unrelatedNeedle() secret")
-    expect(calls.messages).not.toContain("other")
-  })
-
   test("indexes bounded tool/error evidence with provenance", async () => {
-    const historical = session("tool-session", "project-1", "/repo/main", 10)
+    const historical = session("tool-session", "project-A", "/repo/main", 10)
     const tool = toolPart("tool-part", "tool-session", "m1", "bash", {
       status: "error",
       input: { command: "bun test" },
@@ -291,7 +400,7 @@ describe("plugin behavior", () => {
 
   test("refreshes an updated session incrementally", async () => {
     const file = await indexFile()
-    const firstSession = session("history", "project-1", "/repo/main", 10)
+    const firstSession = session("history", "project-A", "/repo/main", 10)
     const first = await plugin({
       file,
       sessions: [firstSession],
@@ -304,7 +413,7 @@ describe("plugin behavior", () => {
     const one = currentOutput("current-a", "Recall oldVersionNeedle()")
     await first.hooks["experimental.chat.messages.transform"]!({}, one.output as any)
 
-    const updatedSession = session("history", "project-1", "/repo/main", 11)
+    const updatedSession = session("history", "project-A", "/repo/main", 11)
     const second = await plugin({
       file,
       sessions: [updatedSession],
@@ -322,7 +431,7 @@ describe("plugin behavior", () => {
 
   test("persistent index reuses unchanged sessions across plugin instances", async () => {
     const file = await indexFile()
-    const historical = session("history", "project-1", "/repo/main", 10)
+    const historical = session("history", "project-A", "/repo/main", 10)
     const first = await plugin({
       file,
       sessions: [historical],
@@ -345,5 +454,41 @@ describe("plugin behavior", () => {
     await second.hooks["experimental.chat.messages.transform"]!({}, two.output as any)
     expect(second.calls.messages).toEqual([])
     expect(injected(two.current)[0]?.text).toContain("persistentNeedle()")
+  })
+
+  test("cold start inspects one extra bounded batch when first batch has no hit", async () => {
+    const sessions = Array.from({ length: MAX_INGEST_PER_TURN + 4 }, (_, index) =>
+      session("cold-" + index, "project-A", "/repo/main", 100 - index, "neutral"),
+    )
+    const relevant = sessions[MAX_INGEST_PER_TURN + 1]
+    const messages: Record<string, any[]> = Object.fromEntries(
+      sessions.map((item) => [
+        item.id,
+        [
+          message(
+            "m-" + item.id,
+            item.id,
+            "assistant",
+            [
+              textPart(
+                "p-" + item.id,
+                item.id,
+                "m-" + item.id,
+                item.id === relevant.id ? "deepColdNeedle() old evidence" : "unrelated historical note",
+              ),
+            ],
+            item.time.updated,
+          ),
+        ],
+      ]),
+    )
+
+    const { hooks, calls } = await plugin({ sessions, messages })
+    const { current, output } = currentOutput("current", "Recall deepColdNeedle()")
+    await hooks["experimental.chat.messages.transform"]!({}, output as any)
+
+    expect(calls.messages.length).toBeLessThanOrEqual(MAX_INGEST_PER_TURN * 2)
+    expect(calls.messages).toContain(relevant.id)
+    expect(injected(current)[0]?.text).toContain("deepColdNeedle()")
   })
 })
