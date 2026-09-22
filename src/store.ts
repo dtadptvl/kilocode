@@ -187,8 +187,23 @@ function boundTraces(traces: Trace[], maxSessionBytes: number) {
   }
   if (bounded.length === 1 && bytes > maxSessionBytes) {
     const only = bounded[0]
-    const text = clipRawText(only.text, Math.max(256, Math.floor(only.text.length * (maxSessionBytes / bytes))))
-    bounded[0] = { ...only, text, entities: entities(text) }
+    const original = only.text
+    let low = 0
+    let high = original.length
+    let best = { ...only, text: "", entities: [] as string[] }
+
+    while (low <= high) {
+      const middle = Math.floor((low + high) / 2)
+      const text = clipRawText(original, middle)
+      const candidate = { ...only, text, entities: entities(text) }
+      if (traceBytes(candidate) <= maxSessionBytes) {
+        best = candidate
+        low = middle + 1
+      } else {
+        high = middle - 1
+      }
+    }
+    bounded[0] = best
   }
   return bounded
 }
