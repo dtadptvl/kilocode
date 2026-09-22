@@ -333,11 +333,13 @@ describe("plugin behavior", () => {
     const recovered = await plugin({
       file,
       sessions: [x],
-      messages: { x: new Error("unchanged session must not be refetched") },
+      messages: {
+        x: [message("x1", "x", "assistant", [textPart("xp", "x", "x1", "survivesListFailure() evidence")], 1)],
+      },
     })
     const recoveredTurn = currentOutput("current-c", "Recall survivesListFailure()")
     await recovered.hooks["experimental.chat.messages.transform"]!({}, recoveredTurn.output as any)
-    expect(recovered.calls.messages).toEqual([])
+    expect(recovered.calls.messages).toEqual(["x"])
     expect(injected(recoveredTurn.current)[0]?.text).toContain("survivesListFailure()")
   })
 
@@ -677,11 +679,17 @@ describe("plugin behavior", () => {
     const second = await plugin({
       file,
       sessions: [historical],
-      messages: { history: new Error("should not refetch unchanged session") },
+      messages: {
+        history: [
+          message("h1", "history", "assistant", [textPart("h1p", "history", "h1", "persistentNeedle() evidence")], 1),
+        ],
+      },
     })
     const two = currentOutput("current-b", "Recall persistentNeedle()")
     await second.hooks["experimental.chat.messages.transform"]!({}, two.output as any)
-    expect(second.calls.messages).toEqual([])
+    // The persistent index avoids broad re-ingestion, but the bounded selected
+    // session is still verified against raw Kilo before injection.
+    expect(second.calls.messages).toEqual(["history"])
     expect(injected(two.current)[0]?.text).toContain("persistentNeedle()")
   })
 })
