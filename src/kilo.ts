@@ -9,6 +9,7 @@ export type KiloPluginInput = {
   project: KiloProject
   directory: string
   worktree: string
+  serverUrl?: URL
 }
 
 export type KiloHooks = {
