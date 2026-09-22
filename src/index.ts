@@ -3,13 +3,15 @@ import { fileURLToPath } from "node:url"
 import type { KiloPlugin as Plugin } from "./kilo.js"
 import {
   COMPACTING_TTL_MS,
+  MAX_COLD_START_EXTRA,
   MAX_INGEST_PER_TURN,
-  MAX_INDEX_SESSIONS,
   RETRIEVAL_TIMEOUT_MS,
   bridgeQueries,
+  clipRawText,
   clipToolText,
   close,
   entities,
+  metadataScore,
   rank,
   render,
   safeJson,
@@ -23,12 +25,18 @@ const SYSTEM_RULE =
 
 type FactoryOptions = {
   indexFile?: string
+  legacyIndexFile?: string
   timeoutMs?: number
+  familyList?: (input: { client: any; directory: string; projectID: string; serverUrl?: URL }) => Promise<any[]>
 }
 
 type CancelToken = { cancelled: boolean }
 
 function defaultIndexFile() {
+  return fileURLToPath(new URL("../zero-mem-index.json", import.meta.url))
+}
+
+function defaultLegacyIndexFile() {
   return fileURLToPath(new URL("../zero-mem-index-v1.json", import.meta.url))
 }
 
@@ -50,6 +58,80 @@ function role(value: unknown): "user" | "assistant" {
   return value === "user" ? "user" : "assistant"
 }
 
+function familyKey(projectWorktree: string, directory: string) {
+  const root = path.resolve(projectWorktree || directory)
+  const value = root === path.parse(root).root ? path.resolve(directory) : root
+  return process.platform === "win32" ? value.toLowerCase() : value
+}
+
+function fingerprint(session: any) {
+  return `${session.id}:${session.version ?? ""}:${session.time?.updated ?? 0}`
+}
+
+function authHeaders() {
+  const password = process.env.KILO_SERVER_PASSWORD
+  if (!password) return undefined
+  const username = process.env.KILO_SERVER_USERNAME || "kilo"
+  return { Authorization: "Basic " + Buffer.from(`${username}:${password}`).toString("base64") }
+}
+
+async function listFamilyFromPublicApi(input: {
+  client: any
+  directory: string
+  projectID: string
+  serverUrl?: URL
+}): Promise<{ sessions: any[]; authoritative: boolean }> {
+  const experimental = input.client?.experimental?.session?.list
+  if (typeof experimental === "function") {
+    try {
+      const result = await experimental(
+        {
+          directory: input.directory,
+          projectID: input.projectID,
+          worktrees: true,
+          archived: true,
+          limit: Number.MAX_SAFE_INTEGER,
+        },
+        { throwOnError: true },
+      )
+      return { sessions: result?.data ?? [], authoritative: true }
+    } catch {
+      // Try the public HTTP endpoint below.
+    }
+  }
+
+  if (input.serverUrl) {
+    try {
+      const url = new URL("/experimental/session", input.serverUrl)
+      url.searchParams.set("directory", input.directory)
+      url.searchParams.set("projectID", input.projectID)
+      url.searchParams.set("worktrees", "true")
+      url.searchParams.set("archived", "true")
+      url.searchParams.set("limit", String(Number.MAX_SAFE_INTEGER))
+      const response = await fetch(url, { headers: authHeaders() })
+      if (response.ok) {
+        const data = await response.json()
+        if (Array.isArray(data)) return { sessions: data, authoritative: true }
+      }
+    } catch {
+      // Fall through to the narrow compatibility path.
+    }
+  }
+
+  try {
+    const result = await input.client.session.list({
+      query: {
+        directory: input.directory,
+        scope: "project",
+        limit: Number.MAX_SAFE_INTEGER,
+      },
+    } as any)
+    return { sessions: result?.data ?? [], authoritative: false }
+  } catch {
+    return { sessions: [], authoritative: false }
+  }
+}
+
 function toolTraceText(part: any) {
   const state = part.state ?? {}
   const lines = [`tool=${part.tool ?? "unknown"}`, `status=${state.status ?? "unknown"}`]
@@ -68,10 +150,10 @@ function fileTraceText(part: any) {
   const values = [part.filename, part.url]
   if (part.source?.path) values.push(part.source.path)
   if (part.source?.name) values.push(part.source.name)
-  return values.filter((value) => typeof value === "string" && value.length > 0).join(" ")
+  return clipRawText(values.filter((value) => typeof value === "string" && value.length > 0).join(" "))
 }
 
-function flattenSession(projectID: string, session: any, messages: any[]) {
+function flattenSession(session: any, messages: any[]) {
   const traces: Trace[] = []
 
   for (const message of messages) {
@@ -87,7 +169,7 @@ function flattenSession(projectID: string, session: any, messages: any[]) {
       let source: string | undefined
 
       if (part.type === "text") {
-        text = typeof part.text === "string" ? part.text.trim() : ""
+        text = typeof part.text === "string" ? clipRawText(part.text) : ""
       } else if (part.type === "tool") {
         kind = "tool"
         source = typeof part.tool === "string" ? part.tool : "tool"
@@ -102,7 +184,7 @@ function flattenSession(projectID: string, session: any, messages: any[]) {
 
       if (!text || text.startsWith("<kilo_zero_mem")) continue
       traces.push({
-        projectID,
+        projectID: String(session.projectID ?? ""),
         sessionID: String(session.id),
         messageID,
         partID: String(part.id),
@@ -120,16 +202,6 @@ function flattenSession(projectID: string, session: any, messages: any[]) {
   return traces
 }
 
-async function sessionList(client: any, directory: string) {
-  return client.session.list({
-    query: {
-      directory,
-      scope: "project",
-      limit: MAX_INDEX_SESSIONS,
-    },
-  } as any)
-}
-
 async function sessionMessages(client: any, session: any) {
   return client.session.messages({
     path: { id: session.id },
@@ -138,8 +210,11 @@ async function sessionMessages(client: any, session: any) {
 }
 
 export function createZeroMem(options: FactoryOptions = {}): Plugin {
-  return async ({ client, directory, project }) => {
-    const index = new PersistentIndex(options.indexFile ?? defaultIndexFile())
+  return async ({ client, directory, project, serverUrl }) => {
+    const scope = familyKey(project.worktree, directory)
+    const index = new PersistentIndex(options.indexFile ?? defaultIndexFile(), {
+      legacyFile: options.legacyIndexFile ?? defaultLegacyIndexFile(),
+    })
     await index.load().catch(() => undefined)
     const compacting = new Map<string, number>()
     const timeoutMs = options.timeoutMs ?? RETRIEVAL_TIMEOUT_MS
@@ -150,6 +225,24 @@ export function createZeroMem(options: FactoryOptions = {}): Plugin {
       if (Date.now() - started <= COMPACTING_TTL_MS) return true
       compacting.delete(sessionID)
       return false
+    }
+
+    async function familySessions() {
+      if (options.familyList) {
+        const sessions = await options.familyList({
+          client,
+          directory,
+          projectID: String(project.id),
+          serverUrl,
+        })
+        return { sessions, authoritative: true }
+      }
+      return listFamilyFromPublicApi({
+        client,
+        directory,
+        projectID: String(project.id),
+        serverUrl,
+      })
     }
 
     async function recall(output: { messages: any[] }, token: CancelToken) {
@@ -174,69 +267,88 @@ export function createZeroMem(options: FactoryOptions = {}): Plugin {
         return
       }
 
-      let listed: any
+      const observedAt = Date.now()
+      let listed: { sessions: any[]; authoritative: boolean }
       try {
-        listed = await sessionList(client as any, directory)
+        listed = await familySessions()
       } catch {
         return
       }
       if (token.cancelled) return
-      if (listed?.error) return
 
-      const sessions = ((listed?.data ?? []) as any[])
-        .filter((session) => String(session.projectID ?? "") === String(project.id))
+      const sessions = listed.sessions
+        .filter((session) => session?.id && session?.directory)
         .sort((a, b) => Number(b.time?.updated ?? 0) - Number(a.time?.updated ?? 0))
-        .slice(0, MAX_INDEX_SESSIONS)
+
+      if (listed.authoritative) {
+        index.reconcile(
+          scope,
+          sessions.map((session) => String(session.id)),
+          observedAt,
+        )
+      }
 
       const changed = sessions
-        .filter((session) => {
-          const fingerprint = `${session.id}:${session.version ?? ""}:${session.time?.updated ?? 0}`
-          return index.session(String(project.id), String(session.id))?.fingerprint !== fingerprint
-        })
+        .filter((session) => index.session(scope, String(session.id))?.fingerprint !== fingerprint(session))
         .sort((a, b) => {
           if (a.id === currentSessionID) return -1
           if (b.id === currentSessionID) return 1
+          const score = metadataScore(query, b) - metadataScore(query, a)
+          if (score) return score
           return Number(b.time?.updated ?? 0) - Number(a.time?.updated ?? 0)
         })
-        .slice(0, MAX_INGEST_PER_TURN)
 
-      let changedIndex = false
-      for (const session of changed) {
-        if (token.cancelled) return
-        try {
-          const response = await sessionMessages(client as any, session)
+      async function ingest(batch: any[]) {
+        for (const session of batch) {
           if (token.cancelled) return
-          if (response?.error) throw response.error
-          const traces = flattenSession(String(project.id), session, response?.data ?? [])
-          index.upsert({
-            projectID: String(project.id),
-            sessionID: String(session.id),
-            directory: String(session.directory ?? ""),
-            updated: Number(session.time?.updated ?? 0),
-            fingerprint: `${session.id}:${session.version ?? ""}:${session.time?.updated ?? 0}`,
-            traces,
-          })
-          changedIndex = true
-        } catch {
-          // One unavailable/corrupt session must not block recall from other sessions.
+          try {
+            const response = await sessionMessages(client as any, session)
+            if (token.cancelled) return
+            if (response?.error) throw response.error
+            index.upsert(scope, {
+              projectID: String(session.projectID ?? ""),
+              sessionID: String(session.id),
+              directory: String(session.directory ?? ""),
+              updated: Number(session.time?.updated ?? 0),
+              fingerprint: fingerprint(session),
+              traces: flattenSession(session, response?.data ?? []),
+            })
+          } catch {
+            // One unavailable/corrupt session must not block recall from other sessions.
+          }
         }
       }
 
-      if (changedIndex) await index.save().catch(() => undefined)
+      const first = changed.slice(0, MAX_INGEST_PER_TURN)
+      await ingest(first)
       if (token.cancelled) return
 
+      const live = new Map(sessions.map((session) => [String(session.id), session]))
       const visible = visibleTailPartIDs(output.messages)
       const currentMessageID = String(current.info?.id ?? "")
-      const allowed = (trace: Trace) => trace.messageID !== currentMessageID && !visible.has(trace.partID)
+      const allowed = (trace: Trace) => {
+        if (trace.messageID === currentMessageID || visible.has(trace.partID)) return false
+        const session = live.get(trace.sessionID)
+        if (!session) return false
+        return index.session(scope, trace.sessionID)?.fingerprint === fingerprint(session)
+      }
 
-      const candidates = index.candidates(String(project.id), query).filter(allowed)
-      if (!candidates.length) return
+      const findSeeds = () => rank(query, index.candidates(scope, query).filter(allowed), { directory, limit: 8 })
+      let seeds = findSeeds()
 
-      let seeds = rank(query, candidates, { directory, limit: 8 })
+      if (seeds.length === 0 && changed.length > first.length) {
+        await ingest(changed.slice(first.length, first.length + MAX_COLD_START_EXTRA))
+        if (token.cancelled) return
+        seeds = findSeeds()
+      }
+
+      await index.save().catch(() => false)
+      if (token.cancelled || seeds.length === 0) return
+
       const bridges = bridgeQueries(query, seeds)
       if (bridges.length) {
         const extra = bridges.flatMap((bridge) =>
-          rank(bridge, index.candidates(String(project.id), bridge).filter(allowed), { directory, limit: 4 }),
+          rank(bridge, index.candidates(scope, bridge).filter(allowed), { directory, limit: 4 }),
         )
         const merged = new Map<string, (typeof seeds)[number]>()
         for (const seed of [...seeds, ...extra]) {
@@ -252,7 +364,7 @@ export function createZeroMem(options: FactoryOptions = {}): Plugin {
       const bySession = new Map<string, Trace[]>()
       for (const seed of seeds) {
         if (bySession.has(seed.sessionID)) continue
-        const sessionTraces = (index.session(String(project.id), seed.sessionID)?.traces ?? [])
+        const sessionTraces = (index.session(scope, seed.sessionID)?.traces ?? [])
           .filter(allowed)
           .sort((a, b) => a.timestamp - b.timestamp || a.partID.localeCompare(b.partID))
         bySession.set(seed.sessionID, sessionTraces)
@@ -274,13 +386,22 @@ export function createZeroMem(options: FactoryOptions = {}): Plugin {
     return {
       event: async ({ event }) => {
         const type = (event as any)?.type
-        const sessionID = String((event as any)?.properties?.sessionID ?? "")
+        const properties = (event as any)?.properties ?? {}
+        const sessionID = String(properties.sessionID ?? properties.info?.id ?? "")
         if (!sessionID) return
+
+        if (type === "session.deleted") {
+          compacting.delete(sessionID)
+          index.remove(scope, sessionID)
+          await index.save().catch(() => false)
+          return
+        }
+
         if (
           type === "session.compacted" ||
           type === "session.idle" ||
           type === "session.error" ||
-          (type === "session.status" && (event as any)?.properties?.status?.type === "idle")
+          (type === "session.status" && properties.status?.type === "idle")
         ) {
           compacting.delete(sessionID)
         }
