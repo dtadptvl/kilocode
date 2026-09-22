@@ -3,11 +3,23 @@ export const MAX_EVIDENCE_CHARS = 6000
 export const RECENT_VISIBLE_PARTS = 12
 export const TOOL_INPUT_MAX = 600
 export const TOOL_TEXT_MAX = 2400
+
+export const MAX_INDEX_FAMILIES = 12
 export const MAX_INDEX_SESSIONS = 500
 export const MAX_TRACES_PER_SESSION = 800
+export const MAX_TRACE_TEXT_CHARS = 12_000
+export const MAX_TRACE_TEXT_BYTES = 24_000
+export const MAX_SESSION_BYTES = 512 * 1024
+export const MAX_STORE_BYTES = 32 * 1024 * 1024
+
 export const MAX_INGEST_PER_TURN = 8
+export const MAX_COLD_START_EXTRA = 8
 export const RETRIEVAL_TIMEOUT_MS = 1800
 export const COMPACTING_TTL_MS = 5 * 60_000
+
+export const INDEX_LOCK_TIMEOUT_MS = 800
+export const INDEX_LOCK_STALE_MS = 5_000
+export const INDEX_LOCK_POLL_MS = 40
 
 export type TraceKind = "text" | "tool" | "file"
 
@@ -41,6 +53,11 @@ const PATH = /(?:[A-Za-z]:\\|\.{0,2}\/|~\/)?[A-Za-z0-9_@.$-]+(?:[\\/][A-Za-z0-9_
 const SYMBOL = /\b[A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)*\(\)/g
 const ERROR = /\b(?:ERR_[A-Z0-9_]+|E[A-Z][A-Z0-9_]{2,}|[A-Z][A-Za-z0-9_]*(?:Error|Exception))\b/g
 const MODEL = /\b[a-z0-9][a-z0-9._-]{1,40}\/[a-z0-9][a-z0-9._-]{1,80}\b/gi
+const encoder = new TextEncoder()
+
+export function utf8Bytes(value: string) {
+  return encoder.encode(value).byteLength
+}
 
 export function normalize(value: string) {
   return value.normalize("NFKC").trim().toLowerCase()
@@ -59,6 +76,39 @@ function uniq(values: string[], limit = Infinity) {
     if (out.length >= limit) break
   }
   return out
+}
+
+function middleClip(value: string, maxChars: number) {
+  if (value.length <= maxChars) return value
+  const marker = "\n…[truncated]…\n"
+  const usable = Math.max(0, maxChars - marker.length)
+  const head = Math.ceil(usable * 0.62)
+  const tail = Math.max(0, usable - head)
+  return value.slice(0, head).trimEnd() + marker + value.slice(value.length - tail).trimStart()
+}
+
+export function clipRawText(
+  value: string,
+  maxChars = MAX_TRACE_TEXT_CHARS,
+  maxBytes = MAX_TRACE_TEXT_BYTES,
+) {
+  let text = middleClip(value.replace(/\u0000/g, "").trim(), maxChars)
+  if (utf8Bytes(text) <= maxBytes) return text
+
+  let low = 0
+  let high = text.length
+  let best = ""
+  while (low <= high) {
+    const mid = Math.floor((low + high) / 2)
+    const candidate = middleClip(text, mid)
+    if (utf8Bytes(candidate) <= maxBytes) {
+      best = candidate
+      low = mid + 1
+    } else {
+      high = mid - 1
+    }
+  }
+  return best
 }
 
 export function tokens(text: string) {
@@ -145,6 +195,16 @@ export function rank(query: string, traces: Trace[], options?: { directory?: str
     .slice(0, limit)
 }
 
+export function metadataScore(query: string, session: { title?: string; directory?: string }) {
+  const body = `${session.title ?? ""} ${session.directory ?? ""}`
+  const normalized = normalize(body)
+  let score = 0
+  for (const entity of entities(query)) if (normalized.includes(normalize(entity))) score += 6
+  const bodyTokens = new Set(tokens(body))
+  for (const token of tokens(query)) if (bodyTokens.has(token)) score += 1
+  return score
+}
+
 export function bridgeQueries(query: string, seeds: ReturnType<typeof rank>) {
   const known = new Set([...entities(query), ...tokens(query)].map(normalize))
   const out: string[] = []
@@ -186,11 +246,7 @@ export function close(seeds: ReturnType<typeof rank>, bySession: Map<string, Tra
 }
 
 export function clipToolText(value: string, max = TOOL_TEXT_MAX) {
-  const text = value.replace(/\u0000/g, "").trim()
-  if (text.length <= max) return text
-  const head = Math.floor(max * 0.62)
-  const tail = max - head - 20
-  return text.slice(0, head).trimEnd() + "\n…[truncated]…\n" + text.slice(-tail).trimStart()
+  return clipRawText(value, max, max * 2)
 }
 
 export function safeJson(value: unknown, max = TOOL_INPUT_MAX) {
