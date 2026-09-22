@@ -353,7 +353,7 @@ describe("plugin behavior", () => {
     })
     const before = currentOutput("current-a", "Recall eventDeleteNeedle()")
     await first.hooks["experimental.chat.messages.transform"]!({}, before.output as any)
-    await first.hooks.event!({ event: { type: "session.deleted", properties: { sessionID: "x" } } as any })
+    await first.hooks.event!({ event: { type: "session.deleted", properties: { info: x } } as any })
 
     const second = await plugin({ file, sessions: [], messages: {} })
     const after = currentOutput("current-b", "Recall eventDeleteNeedle()")
@@ -436,6 +436,34 @@ describe("plugin behavior", () => {
     await second.hooks["experimental.chat.messages.transform"]!({}, two.output as any)
     expect(second.calls.messages).toEqual(["history"])
     expect(injected(two.current)[0]?.text).toContain("newVersionNeedle()")
+  })
+
+  test("does not recall stale evidence when authoritative metadata changed but refresh fetch fails", async () => {
+    const file = await indexFile()
+    const oldSession = session("history", "project-A", "/repo/main", 10)
+    const first = await plugin({
+      file,
+      sessions: [oldSession],
+      messages: {
+        history: [
+          message("h1", "history", "assistant", [textPart("h1p", "history", "h1", "staleNeedle() old evidence")], 1),
+        ],
+      },
+    })
+    const one = currentOutput("current-a", "Recall staleNeedle()")
+    await first.hooks["experimental.chat.messages.transform"]!({}, one.output as any)
+    expect(injected(one.current)[0]?.text).toContain("staleNeedle()")
+
+    const changedSession = session("history", "project-A", "/repo/main", 11)
+    const second = await plugin({
+      file,
+      sessions: [changedSession],
+      messages: { history: new Error("refresh unavailable") },
+    })
+    const two = currentOutput("current-b", "Recall staleNeedle()")
+    await second.hooks["experimental.chat.messages.transform"]!({}, two.output as any)
+    expect(second.calls.messages).toContain("history")
+    expect(injected(two.current)).toHaveLength(0)
   })
 
   test("persistent index reuses unchanged sessions across plugin instances", async () => {
