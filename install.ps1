@@ -51,22 +51,32 @@ try {
 
   $version = Validate-Stage $stageRoot
 
-  $oldIndex = Join-Path $pluginRoot 'zero-mem-index-v1.json'
-  if (Test-Path -LiteralPath $oldIndex) {
-    Copy-Item -Force -LiteralPath $oldIndex -Destination (Join-Path $stageRoot 'zero-mem-index-v1.json')
+  foreach ($indexName in @('zero-mem-index.json', 'zero-mem-index-v1.json')) {
+    $oldIndex = Join-Path $pluginRoot $indexName
+    if (Test-Path -LiteralPath $oldIndex) {
+      Copy-Item -Force -LiteralPath $oldIndex -Destination (Join-Path $stageRoot $indexName)
+    }
   }
 
   Remove-Item -Recurse -Force -ErrorAction SilentlyContinue -LiteralPath $rollbackRoot
   $hadPrevious = Test-Path -LiteralPath $pluginRoot
   if ($hadPrevious) { Move-Item -LiteralPath $pluginRoot -Destination $rollbackRoot }
 
-  $configBackups = @()
+  $configState = @()
   foreach ($name in @('opencode.json', 'opencode.jsonc')) {
     $file = Join-Path $configRoot $name
-    if (-not (Test-Path -LiteralPath $file)) { continue }
+    $existedBefore = Test-Path -LiteralPath $file
     $backup = "$file.zero-mem-install-rollback.bak"
-    Copy-Item -Force -LiteralPath $file -Destination $backup
-    $configBackups += [pscustomobject]@{ File = $file; Backup = $backup }
+    if ($existedBefore) {
+      Copy-Item -Force -LiteralPath $file -Destination $backup
+    } else {
+      Remove-Item -Force -ErrorAction SilentlyContinue -LiteralPath $backup
+    }
+    $configState += [pscustomobject]@{
+      File = $file
+      Backup = $backup
+      ExistedBefore = $existedBefore
+    }
   }
 
   try {
@@ -81,15 +91,19 @@ try {
     if ($hadPrevious -and (Test-Path -LiteralPath $rollbackRoot)) {
       Move-Item -LiteralPath $rollbackRoot -Destination $pluginRoot
     }
-    foreach ($item in $configBackups) {
-      if (Test-Path -LiteralPath $item.Backup) {
-        Copy-Item -Force -LiteralPath $item.Backup -Destination $item.File
+    foreach ($item in $configState) {
+      if ($item.ExistedBefore) {
+        if (Test-Path -LiteralPath $item.Backup) {
+          Copy-Item -Force -LiteralPath $item.Backup -Destination $item.File
+        }
+      } else {
+        Remove-Item -Force -ErrorAction SilentlyContinue -LiteralPath $item.File
       }
     }
     throw
   }
 
-  foreach ($item in $configBackups) {
+  foreach ($item in $configState) {
     Remove-Item -Force -ErrorAction SilentlyContinue -LiteralPath $item.Backup
   }
   Remove-Item -Recurse -Force -ErrorAction SilentlyContinue -LiteralPath $rollbackRoot
