@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { mkdir, mkdtemp, readFile, rm, stat, utimes, writeFile } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
-import { MAX_TRACE_TEXT_CHARS, utf8Bytes, type Trace } from "../src/core"
+import { MAX_TRACE_TEXT_BYTES, MAX_TRACE_TEXT_CHARS, utf8Bytes, type Trace } from "../src/core"
 import { PersistentIndex, type SessionInput } from "../src/store"
 
 const temps: string[] = []
@@ -142,7 +142,7 @@ describe("persistent derived index", () => {
     const store = new PersistentIndex(file, { maxSessionBytes: 4_000 })
     await store.load()
     const many = Array.from({ length: 20 }, (_, index) =>
-      trace("p-" + index, "x".repeat(MAX_TRACE_TEXT_CHARS * 2), {
+      trace("p-" + index, "🙂".repeat(MAX_TRACE_TEXT_CHARS * 2), {
         sessionID: "big",
         messageID: "m-" + index,
         timestamp: index,
@@ -159,6 +159,7 @@ describe("persistent derived index", () => {
 
     const indexed = store.session("big")!
     expect(indexed.traces.every((item) => item.text.length <= MAX_TRACE_TEXT_CHARS)).toBe(true)
+    expect(indexed.traces.every((item) => utf8Bytes(item.text) <= MAX_TRACE_TEXT_BYTES)).toBe(true)
     expect(indexed.traces.reduce((sum, item) => sum + utf8Bytes(JSON.stringify(item)), 0)).toBeLessThanOrEqual(4_000)
   })
 

@@ -290,7 +290,8 @@ export function createZeroMem(options: FactoryOptions = {}): Plugin {
       const projectIDs = [
         ...new Set([String(project.id), ...sessions.map((session) => String(session.projectID ?? "")).filter(Boolean)]),
       ]
-      const liveSessionIDs = new Set(sessions.map((session) => String(session.id)))
+      const liveSessions = new Map(sessions.map((session) => [String(session.id), session]))
+      const liveSessionIDs = new Set(liveSessions.keys())
       const authoritative = sessions.length < FAMILY_LIST_LIMIT
       const family = index.reconcileFamily(projectIDs, liveSessionIDs, authoritative)
 
@@ -304,7 +305,12 @@ export function createZeroMem(options: FactoryOptions = {}): Plugin {
 
       const visible = visibleTailPartIDs(output.messages)
       const currentMessageID = String(current.info?.id ?? "")
-      const allowed = (trace: Trace) => trace.messageID !== currentMessageID && !visible.has(trace.partID)
+      const allowed = (trace: Trace) => {
+        if (trace.messageID === currentMessageID || visible.has(trace.partID)) return false
+        const live = liveSessions.get(trace.sessionID)
+        if (!live) return false
+        return index.session(trace.sessionID)?.fingerprint === fingerprint(live)
+      }
 
       const ranked = () => rank(query, index.candidates(family, query).filter(allowed), { directory, limit: 8 })
       let seeds = ranked()
@@ -362,7 +368,8 @@ export function createZeroMem(options: FactoryOptions = {}): Plugin {
     return {
       event: async ({ event }) => {
         const type = (event as any)?.type
-        const sessionID = String((event as any)?.properties?.sessionID ?? "")
+        const properties = (event as any)?.properties ?? {}
+        const sessionID = String(properties.sessionID ?? properties.info?.id ?? "")
         if (!sessionID) return
 
         if (type === "session.deleted") {
@@ -376,7 +383,7 @@ export function createZeroMem(options: FactoryOptions = {}): Plugin {
           type === "session.compacted" ||
           type === "session.idle" ||
           type === "session.error" ||
-          (type === "session.status" && (event as any)?.properties?.status?.type === "idle")
+          (type === "session.status" && properties.status?.type === "idle")
         ) {
           compacting.delete(sessionID)
         }
