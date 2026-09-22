@@ -9,6 +9,7 @@ export const MAX_INGEST_PER_TURN = 8
 export const COLD_START_EXTRA_INGEST = 8
 export const FAMILY_LIST_LIMIT = 5000
 export const MAX_TRACE_TEXT_CHARS = 8000
+export const MAX_TRACE_TEXT_BYTES = 24_000
 export const MAX_SESSION_INDEX_BYTES = 256 * 1024
 export const MAX_INDEX_FAMILIES = 32
 export const MAX_STORE_BYTES = 24 * 1024 * 1024
@@ -198,14 +199,38 @@ export function utf8Bytes(value: string) {
   return new TextEncoder().encode(value).length
 }
 
-export function clipRawText(value: string, max = MAX_TRACE_TEXT_CHARS) {
-  const text = value.replace(/\u0000/g, "").trim()
-  if (text.length <= max) return text
+function clipTextChars(value: string, maxChars: number) {
+  if (value.length <= maxChars) return value
   const marker = "\n…[truncated]…\n"
-  const usable = Math.max(0, max - marker.length)
+  const usable = Math.max(0, maxChars - marker.length)
   const head = Math.floor(usable * 0.62)
   const tail = usable - head
-  return text.slice(0, head).trimEnd() + marker + text.slice(-tail).trimStart()
+  return value.slice(0, head).trimEnd() + marker + value.slice(-tail).trimStart()
+}
+
+export function clipRawText(
+  value: string,
+  maxChars = MAX_TRACE_TEXT_CHARS,
+  maxBytes = MAX_TRACE_TEXT_BYTES,
+) {
+  const clean = value.replace(/\u0000/g, "").trim()
+  let text = clipTextChars(clean, maxChars)
+  if (utf8Bytes(text) <= maxBytes) return text
+
+  let low = 0
+  let high = Math.min(maxChars, clean.length)
+  let best = ""
+  while (low <= high) {
+    const middle = Math.floor((low + high) / 2)
+    const candidate = clipTextChars(clean, middle)
+    if (utf8Bytes(candidate) <= maxBytes) {
+      best = candidate
+      low = middle + 1
+    } else {
+      high = middle - 1
+    }
+  }
+  return best
 }
 
 export function clipToolText(value: string, max = TOOL_TEXT_MAX) {
