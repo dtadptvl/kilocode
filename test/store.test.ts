@@ -190,7 +190,7 @@ describe("persistent derived index", () => {
     const store = new PersistentIndex(file, { maxStoreBytes: 2_000 })
     await store.load()
 
-    const historical = Array.from({ length: 500 }, (_, index) => "historical-project-" + index)
+    const historical = ["project-current", ...Array.from({ length: 500 }, (_, index) => "historical-project-" + index)]
     store.reconcileFamily(historical, new Set(), false, 10)
     store.reconcileFamily(["project-current"], new Set(), true, 20)
     expect(await store.save()).toBe(true)
