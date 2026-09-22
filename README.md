@@ -35,7 +35,7 @@ Windows PowerShell:
 irm https://raw.githubusercontent.com/dtadptvl/kilocode-zero-mem/main/install-online.ps1 | iex
 ```
 
-The script on `main` is only the bootstrap. The actual Zero-Mem 0.2.1 plugin payload is pinned to immutable source commit `842257d3efc501b0d4fe17d75a34d0d830dff60c` and is never downloaded from mutable `main`. The same commit is recorded in `release.json`, `install-online.ps1`, and `uninstall-online.ps1`; CI asserts that they agree.
+The script on `main` is only the bootstrap. The actual Zero-Mem 0.2.1 plugin payload is pinned to immutable source commit `a61482bb735ec084c897311756dc41e5da5bc2e6` and is never downloaded from mutable `main`. The same commit is recorded in `release.json`, `install-online.ps1`, and `uninstall-online.ps1`; CI asserts that they agree.
 
 The installer stages and validates the complete package before replacing the working plugin, preserves the local derived index during upgrades, registers through Kilo's native global plugin command, and rolls back both plugin files and Kilo config if registration fails. A failed first install removes any config file created by the failed registration.
 
