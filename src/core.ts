@@ -145,8 +145,10 @@ export function rank(query: string, traces: Trace[], options?: { directory?: str
         score += Math.min(5, idf * 2)
       }
 
-      if (options?.directory && normalize(trace.directory) === normalize(options.directory)) score += 0.5
-      if (trace.kind === "tool" && /error|failed|exit\s*[1-9]|compiler|test/i.test(trace.text)) score += 0.75
+      // Context/type boosts may rerank a real lexical/entity match, but
+      // must never manufacture a match by themselves.
+      if (score > 0 && options?.directory && normalize(trace.directory) === normalize(options.directory)) score += 0.5
+      if (score > 0 && trace.kind === "tool" && /error|failed|exit\s*[1-9]|compiler|test/i.test(trace.text)) score += 0.75
 
       return { ...trace, score }
     })
