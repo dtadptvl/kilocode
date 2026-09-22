@@ -53,6 +53,7 @@ type StoreOptions = {
   lockStaleMs?: number
   lockPollMs?: number
   now?: () => number
+  maxStoreBytes?: number
 }
 
 function empty(): IndexFile {
@@ -107,7 +108,7 @@ function newer(left: IndexedSession | undefined, right: IndexedSession) {
   return right.indexedAt >= left.indexedAt ? right : left
 }
 
-function compact(data: IndexFile) {
+function compact(data: IndexFile, maxStoreBytes = MAX_STORE_BYTES) {
   const families = Object.entries(data.families)
     .sort(([ak, a], [bk, b]) => b.touched - a.touched || ak.localeCompare(bk))
     .slice(0, MAX_INDEX_FAMILIES)
@@ -121,7 +122,7 @@ function compact(data: IndexFile) {
     }),
   )
 
-  if (utf8Bytes(JSON.stringify(data)) <= MAX_STORE_BYTES) return
+  if (utf8Bytes(JSON.stringify(data)) <= maxStoreBytes) return
 
   const oldest = Object.entries(data.families)
     .flatMap(([familyKey, family]) =>
@@ -134,7 +135,7 @@ function compact(data: IndexFile) {
     if (!family) continue
     delete family.sessions[item.sessionID]
     if (Object.keys(family.sessions).length === 0) delete data.families[item.familyKey]
-    if (utf8Bytes(JSON.stringify(data)) <= MAX_STORE_BYTES) break
+    if (utf8Bytes(JSON.stringify(data)) <= maxStoreBytes) break
   }
 }
 
@@ -175,6 +176,7 @@ export class PersistentIndex {
   private readonly lockStaleMs: number
   private readonly lockPollMs: number
   private readonly legacyFile?: string
+  private readonly maxStoreBytes: number
 
   constructor(
     readonly file: string,
@@ -185,6 +187,7 @@ export class PersistentIndex {
     this.lockStaleMs = options.lockStaleMs ?? INDEX_LOCK_STALE_MS
     this.lockPollMs = options.lockPollMs ?? INDEX_LOCK_POLL_MS
     this.legacyFile = options.legacyFile
+    this.maxStoreBytes = options.maxStoreBytes ?? MAX_STORE_BYTES
   }
 
   private async preserveLegacy() {
@@ -281,7 +284,7 @@ export class PersistentIndex {
     family.touched = Math.max(family.touched, session.indexedAt)
     family.sessions[session.sessionID] = newer(family.sessions[session.sessionID], session)
     this.pending.push({ type: "upsert", familyKey, session })
-    compact(this.data)
+    compact(this.data, this.maxStoreBytes)
   }
 
   remove(familyKey: string, sessionID: string) {
@@ -357,7 +360,7 @@ export class PersistentIndex {
     try {
       const merged = await this.readDisk()
       for (const mutation of mutations) apply(merged, mutation)
-      compact(merged)
+      compact(merged, this.maxStoreBytes)
 
       const dir = path.dirname(this.file)
       await mkdir(dir, { recursive: true })
