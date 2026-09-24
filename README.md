@@ -35,7 +35,7 @@ Windows PowerShell:
 irm https://raw.githubusercontent.com/dtadptvl/kilocode-zero-mem/main/install-online.ps1 | iex
 ```
 
-The script on `main` is only the bootstrap. The actual Zero-Mem 0.2.1 plugin payload is pinned to immutable source commit `6116963ce779aed936024fe593b22bf4be70503e` and is never downloaded from mutable `main`. The same commit is recorded in `release.json`, `install-online.ps1`, and `uninstall-online.ps1`; CI asserts that they agree.
+The script on `main` is only the bootstrap. The actual Zero-Mem 0.2.2 plugin payload is pinned to immutable source commit `8eba2315ac5054c97e3536ec62d4395da7ea5cc9` and is never downloaded from mutable `main`. The same commit is recorded in `release.json`, `install-online.ps1`, and `uninstall-online.ps1`; CI asserts that they agree.
 
 The installer stages and validates the complete package before replacing the working plugin, preserves the local derived index during upgrades, registers through Kilo's native global plugin command, and rolls back both plugin files and Kilo config if registration fails. A failed first install removes any config file created by the failed registration.
 
@@ -77,13 +77,15 @@ For a relevant normal user turn, Zero-Mem:
 8. extracts paths, symbols, error codes and other useful engineering entities deterministically;
 9. performs order-insensitive weighted token/entity retrieval through a persistent inverted lookup;
 10. follows at most one bounded relational bridge and expands only the immediate temporal neighborhood;
-11. injects at most 10 evidence items within a strict 6000-character prompt budget.
+11. listens for `message.removed`, `message.updated`, `message.part.removed`, and `message.part.updated`; affected sessions are invalidated immediately and remain unavailable until raw Kilo transcript refetch succeeds;
+12. verifies only the bounded selected candidate sessions against raw Kilo transcript before final injection, so transcript edits that do not bump `session.time.updated` cannot survive as stale recall;
+13. injects at most 10 evidence items within a strict 6000-character prompt budget.
 
-No LLM is invoked by indexing, retrieval, reconciliation, or persistence.
+No LLM is invoked by indexing, retrieval, reconciliation, verification, or persistence.
 
 ## Worktree-family scope
 
-Zero-Mem 0.2.1 reuses Kilo's public `/experimental/session` worktree-family listing semantics with `worktrees=true`. This is the same Kilo behavior that is tested for project-ID drift between a repository root and sibling worktrees.
+Zero-Mem 0.2.2 reuses Kilo's public `/experimental/session` worktree-family listing semantics with `worktrees=true`. This is the same Kilo behavior that is tested for project-ID drift between a repository root and sibling worktrees.
 
 Directory and original `projectID` remain evidence provenance, but exact project-ID equality is not the family boundary.
 
@@ -115,17 +117,17 @@ The active index filename is:
 zero-mem-index.json
 ```
 
-The schema version lives inside the file. Zero-Mem 0.2.1 can read the prior v2 data stored under `zero-mem-index-v1.json`, then writes the migrated state to the version-neutral filename after a successful save.
+The schema version lives inside the file. Zero-Mem 0.2.2 can read prior v2 data stored under `zero-mem-index-v1.json`. Migration re-applies current trace clipping, session byte limits, entity extraction, and lookup construction before the data is saved under the version-neutral filename.
 
 The index is derived data. Raw Kilo history remains authoritative.
 
 Persistence is bounded by explicit constants for:
 
-- raw text per trace;
+- raw text characters and UTF-8 bytes per trace;
 - traces and aggregate bytes per session;
 - retained sessions;
 - retained worktree families;
-- total serialized store bytes.
+- total serialized store bytes as an absolute cap, including family metadata.
 
 Normal raw text uses deterministic prefix/suffix clipping when necessary; tool text retains its separate bounded policy.
 
@@ -135,15 +137,15 @@ Cross-process writes use a small filesystem lock with a bounded wait and determi
 
 A successful authoritative Kilo family listing is reconciled against the derived index. Indexed sessions no longer in that family listing are removed.
 
-Zero-Mem also handles `session.deleted` for immediate best-effort cleanup.
+Zero-Mem also handles `session.deleted` for immediate best-effort cleanup. Transcript mutation events invalidate the affected session even when Kilo leaves session metadata unchanged; stale indexed content is not eligible again until raw transcript refetch succeeds.
 
 A failed or non-authoritative/truncated listing never triggers destructive reconciliation.
 
 ## Kilo native recall compatibility audit
 
-Kilo now contains native local recall/search infrastructure with its own worktree-family handling and local transcript indexes. Zero-Mem 0.2.1 does **not** rewrite itself around that implementation.
+Kilo now contains native local recall/search infrastructure with its own worktree-family handling and local transcript indexes. Zero-Mem 0.2.2 does **not** rewrite itself around that implementation.
 
-The useful worktree-family session-list behavior is exposed by a public Kilo endpoint and is reused here. The native raw recall search implementation itself is currently internal/tool-backed rather than exposed as a clean public plugin/SDK search interface suitable for this external plugin. Importing those internal modules would couple Zero-Mem to Kilo core internals, so 0.2.1 deliberately does not do that.
+The useful worktree-family session-list behavior is exposed by a public Kilo endpoint and is reused here. The native raw recall search implementation itself is currently internal/tool-backed rather than exposed as a clean public plugin/SDK search interface suitable for this external plugin. Importing those internal modules would couple Zero-Mem to Kilo core internals, so 0.2.2 deliberately does not do that.
 
 If Kilo later exposes native raw recall search through a stable public plugin/SDK API, Zero-Mem could simplify by reusing it and potentially remove part of its own derived lexical index.
 

@@ -12,7 +12,7 @@ function defaultRef(script: string) {
   return script.match(/\[string\]\$Ref\s*=\s*'([0-9a-f]{40})'/)?.[1]
 }
 
-test("0.2.1 bootstrap and documentation agree on the immutable payload", async () => {
+test("0.2.2 bootstrap and documentation agree on the immutable payload", async () => {
   const [releaseText, packageText, install, uninstall, readme] = await Promise.all([
     text("release.json"),
     text("package.json"),
@@ -24,7 +24,7 @@ test("0.2.1 bootstrap and documentation agree on the immutable payload", async (
   const release = JSON.parse(releaseText) as { version: string; payload: string }
   const pkg = JSON.parse(packageText) as { version: string }
 
-  expect(release.version).toBe("0.2.1")
+  expect(release.version).toBe("0.2.2")
   expect(pkg.version).toBe(release.version)
   expect(release.payload).toMatch(/^[0-9a-f]{40}$/)
   expect(defaultRef(install)).toBe(release.payload)
