@@ -497,8 +497,15 @@ export class PersistentIndex {
           await rm(this.legacyFile, { force: true }).catch(() => undefined)
         }
 
-        this.data = merged
+        const tail = this.pending.slice(count)
         this.pending.splice(0, count)
+        this.data = merged
+        for (const mutation of tail) applyMutation(this.data, mutation, this.maxSessionBytes)
+        prune(this.data, {
+          maxFamilies: this.maxFamilies,
+          maxSessions: this.maxSessions,
+          maxStoreBytes: this.maxStoreBytes,
+        })
         return true
       } catch {
         return false
