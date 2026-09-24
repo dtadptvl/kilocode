@@ -357,7 +357,8 @@ describe("plugin behavior", () => {
     })
     const recoveredTurn = currentOutput("current-c", "Recall survivesListFailure()")
     await recovered.hooks["experimental.chat.messages.transform"]!({}, recoveredTurn.output as any)
-    expect(recovered.calls.messages).toEqual(["x"])
+    expect(recovered.calls.messages).toEqual([])
+    expect(recovered.calls.message).toContainEqual({ sessionID: "x", messageID: "x1" })
     expect(injected(recoveredTurn.current)[0]?.text).toContain("survivesListFailure()")
   })
 
