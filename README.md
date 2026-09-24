@@ -35,7 +35,7 @@ Windows PowerShell:
 irm https://raw.githubusercontent.com/dtadptvl/kilocode-zero-mem/main/install-online.ps1 | iex
 ```
 
-The script on `main` is only the bootstrap. The actual Zero-Mem 0.2.2 plugin payload is pinned to immutable source commit `29584ae3b2bd116743fdbcb03072939dce5f04ff` and is never downloaded from mutable `main`. The same commit is recorded in `release.json`, `install-online.ps1`, and `uninstall-online.ps1`; CI asserts that they agree.
+The script on `main` is only the bootstrap. The actual Zero-Mem 0.2.3 plugin payload is pinned to immutable source commit `4f499ba848d8db5e4439b714a2a9fbc14d3d792d` and is never downloaded from mutable `main`. The same commit is recorded in `release.json`, `install-online.ps1`, and `uninstall-online.ps1`; CI asserts that they agree.
 
 The installer stages and validates the complete package before replacing the working plugin, preserves the local derived index during upgrades, registers through Kilo's native global plugin command, and rolls back both plugin files and Kilo config if registration fails. A failed first install removes any config file created by the failed registration.
 
@@ -86,7 +86,7 @@ No LLM is invoked by indexing, retrieval, reconciliation, verification, or persi
 
 ## Worktree-family scope
 
-Zero-Mem 0.2.2 reuses Kilo's public `/experimental/session` worktree-family listing semantics with `worktrees=true`. This is the same Kilo behavior that is tested for project-ID drift between a repository root and sibling worktrees.
+Zero-Mem 0.2.3 reuses Kilo's public `/experimental/session` worktree-family listing semantics with `worktrees=true`. This is the same Kilo behavior that is tested for project-ID drift between a repository root and sibling worktrees.
 
 Directory and original `projectID` remain evidence provenance, but exact project-ID equality is not the family boundary.
 
@@ -118,7 +118,7 @@ The active index filename is:
 zero-mem-index.json
 ```
 
-The schema version lives inside the file. Zero-Mem 0.2.2 can read prior v2 data stored under `zero-mem-index-v1.json`. Migration re-applies current trace clipping, session byte limits, entity extraction, and lookup construction before the data is saved under the version-neutral filename.
+The schema version lives inside the file. Zero-Mem 0.2.3 can read prior v2 data stored under `zero-mem-index-v1.json`. Migration re-applies current trace clipping, session byte limits, entity extraction, and lookup construction before the data is saved under the version-neutral filename.
 
 The index is derived data. Raw Kilo history remains authoritative.
 
@@ -138,15 +138,15 @@ Cross-process writes use a small filesystem lock with a bounded wait and determi
 
 A successful authoritative Kilo family listing is reconciled against the derived index. Indexed sessions no longer in that family listing are removed.
 
-Zero-Mem also handles `session.deleted` for immediate best-effort cleanup. Transcript mutation events invalidate the affected session even when Kilo leaves session metadata unchanged; a per-session mutation generation prevents any pre-mutation raw snapshot from restoring it, and stale indexed content is not eligible again until a post-mutation raw refetch succeeds.
+Zero-Mem also handles `session.deleted` for immediate best-effort cleanup. Deletion advances the same per-session mutation generation used by transcript mutations, so any raw snapshot that started before the delete cannot be accepted or injected afterward. Transcript mutation events likewise invalidate affected sessions even when Kilo leaves session metadata unchanged.
 
 A failed or non-authoritative/truncated listing never triggers destructive reconciliation.
 
 ## Kilo native recall compatibility audit
 
-Kilo now contains native local recall/search infrastructure with its own worktree-family handling and local transcript indexes. Zero-Mem 0.2.2 does **not** rewrite itself around that implementation.
+Kilo now contains native local recall/search infrastructure with its own worktree-family handling and local transcript indexes. Zero-Mem 0.2.3 does **not** rewrite itself around that implementation.
 
-The useful worktree-family session-list behavior is exposed by a public Kilo endpoint and is reused here. The native raw recall search implementation itself is currently internal/tool-backed rather than exposed as a clean public plugin/SDK search interface suitable for this external plugin. Importing those internal modules would couple Zero-Mem to Kilo core internals, so 0.2.2 deliberately does not do that.
+The useful worktree-family session-list behavior is exposed by a public Kilo endpoint and is reused here. The native raw recall search implementation itself is currently internal/tool-backed rather than exposed as a clean public plugin/SDK search interface suitable for this external plugin. Importing those internal modules would couple Zero-Mem to Kilo core internals, so 0.2.3 deliberately does not do that.
 
 If Kilo later exposes native raw recall search through a stable public plugin/SDK API, Zero-Mem could simplify by reusing it and potentially remove part of its own derived lexical index.
 
