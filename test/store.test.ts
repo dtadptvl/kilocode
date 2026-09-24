@@ -111,6 +111,43 @@ describe("persistent derived index", () => {
     expect(reloaded.session("same")?.traces[0]?.text).toBe("new")
   })
 
+  test("save completion reapplies newer local mutations that arrived in flight", async () => {
+    const file = await tempFile()
+    const lock = file + ".lock"
+    await mkdir(lock)
+
+    const store = new PersistentIndex(file, {
+      lockTimeoutMs: 1_000,
+      lockStaleMs: 10_000,
+      lockPollMs: 100,
+    })
+    await store.load()
+    store.upsert(["p"], session("x", 10, "saved-first"))
+
+    const firstSave = store.save()
+    // save() yields through load/writeChain, then blocks on the pre-existing lock.
+    // A zero-delay timer runs after those microtasks, so the save has captured X.
+    await new Promise<void>((resolve) => setTimeout(resolve, 0))
+
+    store.remove("x")
+    expect(store.session("x")).toBeUndefined()
+    await rm(lock, { recursive: true, force: true })
+
+    expect(await firstSave).toBe(true)
+    expect(store.session("x")).toBeUndefined()
+    expect((store as any).pending).toHaveLength(1)
+    expect((store as any).pending[0]).toMatchObject({ kind: "remove", sessionID: "x" })
+
+    const diskAfterFirst = new PersistentIndex(file)
+    await diskAfterFirst.load()
+    expect(diskAfterFirst.session("x")).toBeDefined()
+
+    expect(await store.save()).toBe(true)
+    const diskAfterSecond = new PersistentIndex(file)
+    await diskAfterSecond.load()
+    expect(diskAfterSecond.session("x")).toBeUndefined()
+  })
+
   test("stale lock is recovered deterministically", async () => {
     const file = await tempFile()
     const lock = file + ".lock"

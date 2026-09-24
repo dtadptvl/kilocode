@@ -590,8 +590,10 @@ export function createZeroMem(options: FactoryOptions = {}): Plugin {
         if (!sessionID) return
 
         if (type === "session.deleted") {
-          dirtySessions.delete(sessionID)
-          index.remove(sessionID)
+          // Deletion must invalidate any raw snapshot that started before the
+          // delete event. Keep the session dirty/unavailable until Kilo's raw
+          // source can authoritatively prove otherwise on a later turn.
+          markDirty(sessionID)
           await index.save().catch(() => false)
           compacting.delete(sessionID)
           return
