@@ -35,7 +35,7 @@ Windows PowerShell:
 irm https://raw.githubusercontent.com/dtadptvl/kilocode-zero-mem/main/install-online.ps1 | iex
 ```
 
-The script on `main` is only the bootstrap. The actual Zero-Mem 0.2.2 plugin payload is pinned to immutable source commit `8eba2315ac5054c97e3536ec62d4395da7ea5cc9` and is never downloaded from mutable `main`. The same commit is recorded in `release.json`, `install-online.ps1`, and `uninstall-online.ps1`; CI asserts that they agree.
+The script on `main` is only the bootstrap. The actual Zero-Mem 0.2.2 plugin payload is pinned to immutable source commit `29584ae3b2bd116743fdbcb03072939dce5f04ff` and is never downloaded from mutable `main`. The same commit is recorded in `release.json`, `install-online.ps1`, and `uninstall-online.ps1`; CI asserts that they agree.
 
 The installer stages and validates the complete package before replacing the working plugin, preserves the local derived index during upgrades, registers through Kilo's native global plugin command, and rolls back both plugin files and Kilo config if registration fails. A failed first install removes any config file created by the failed registration.
 
@@ -77,9 +77,10 @@ For a relevant normal user turn, Zero-Mem:
 8. extracts paths, symbols, error codes and other useful engineering entities deterministically;
 9. performs order-insensitive weighted token/entity retrieval through a persistent inverted lookup;
 10. follows at most one bounded relational bridge and expands only the immediate temporal neighborhood;
-11. listens for `message.removed`, `message.updated`, `message.part.removed`, and `message.part.updated`; affected sessions are invalidated immediately and remain unavailable until raw Kilo transcript refetch succeeds;
-12. verifies only the bounded selected candidate sessions against raw Kilo transcript before final injection, so transcript edits that do not bump `session.time.updated` cannot survive as stale recall;
-13. injects at most 10 evidence items within a strict 6000-character prompt budget.
+11. listens for `message.removed`, `message.updated`, `message.part.removed`, and `message.part.updated`; each mutation advances a per-session generation so a raw snapshot fetched before the latest mutation can never clear dirty state;
+12. verifies only bounded selected provenance through Kilo's public single-message API plus immediate neighboring message IDs, using a full-session refetch only for dirty/fallback cases;
+13. ranks the original query on verified raw traces first, derives relational bridges only from verified primary evidence, and recomputes bridge expansion after verification awaits so stale/unverified entities cannot influence final recall;
+14. injects at most 10 evidence items within a strict 6000-character prompt budget.
 
 No LLM is invoked by indexing, retrieval, reconciliation, verification, or persistence.
 
@@ -137,7 +138,7 @@ Cross-process writes use a small filesystem lock with a bounded wait and determi
 
 A successful authoritative Kilo family listing is reconciled against the derived index. Indexed sessions no longer in that family listing are removed.
 
-Zero-Mem also handles `session.deleted` for immediate best-effort cleanup. Transcript mutation events invalidate the affected session even when Kilo leaves session metadata unchanged; stale indexed content is not eligible again until raw transcript refetch succeeds.
+Zero-Mem also handles `session.deleted` for immediate best-effort cleanup. Transcript mutation events invalidate the affected session even when Kilo leaves session metadata unchanged; a per-session mutation generation prevents any pre-mutation raw snapshot from restoring it, and stale indexed content is not eligible again until a post-mutation raw refetch succeeds.
 
 A failed or non-authoritative/truncated listing never triggers destructive reconciliation.
 
