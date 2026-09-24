@@ -52,7 +52,20 @@ async function plugin(input: {
   timeoutMs?: number
   file?: string
 }) {
-  const calls = { list: 0, messages: [] as string[], listParams: undefined as any }
+  const calls = {
+    list: 0,
+    messages: [] as string[],
+    message: [] as Array<{ sessionID: string; messageID: string }>,
+    listParams: undefined as any,
+  }
+
+  const source = async (sessionID: string) => {
+    const value = input.messages[sessionID]
+    if (typeof value === "function") return value()
+    if (value instanceof Error) throw value
+    return { data: value ?? [] }
+  }
+
   const client = {
     experimental: {
       session: {
@@ -67,10 +80,15 @@ async function plugin(input: {
     session: {
       messages: async ({ path: requestPath }: any) => {
         calls.messages.push(requestPath.id)
-        const value = input.messages[requestPath.id]
-        if (typeof value === "function") return value()
-        if (value instanceof Error) throw value
-        return { data: value ?? [] }
+        return source(requestPath.id)
+      },
+      message: async ({ path: requestPath }: any) => {
+        calls.message.push({ sessionID: requestPath.id, messageID: requestPath.messageID })
+        const response = await source(requestPath.id)
+        if (response?.error) return response
+        const found = (response?.data ?? []).find((item: any) => item.info?.id === requestPath.messageID)
+        if (!found) return { error: { name: "NotFound" } }
+        return { data: found }
       },
     },
   }
@@ -339,7 +357,8 @@ describe("plugin behavior", () => {
     })
     const recoveredTurn = currentOutput("current-c", "Recall survivesListFailure()")
     await recovered.hooks["experimental.chat.messages.transform"]!({}, recoveredTurn.output as any)
-    expect(recovered.calls.messages).toEqual(["x"])
+    expect(recovered.calls.messages).toEqual([])
+    expect(recovered.calls.message).toContainEqual({ sessionID: "x", messageID: "x1" })
     expect(injected(recoveredTurn.current)[0]?.text).toContain("survivesListFailure()")
   })
 
@@ -629,6 +648,157 @@ describe("plugin behavior", () => {
     expect(injected(after.current)).toHaveLength(0)
   })
 
+  test("pre-mutation raw fetch cannot clear dirty or resurrect old evidence", async () => {
+    const file = await indexFile()
+    const historical = session("history", "project-A", "/repo/main", 10)
+    const oldRaw = [
+      message("h1", "history", "assistant", [textPart("part-1", "history", "h1", "raceOldNeedle() evidence")], 1),
+    ]
+    const newRaw = [
+      message("h1", "history", "assistant", [textPart("part-1", "history", "h1", "raceNewNeedle() evidence")], 1),
+    ]
+
+    let sourceCall = 0
+    let releaseOld!: (value: any) => void
+    let verificationStarted!: () => void
+    const started = new Promise<void>((resolve) => {
+      verificationStarted = resolve
+    })
+
+    const instance = await plugin({
+      file,
+      sessions: [historical],
+      messages: {
+        history: async () => {
+          sourceCall++
+          if (sourceCall === 1) return { data: oldRaw }
+          if (sourceCall === 2) {
+            verificationStarted()
+            return new Promise((resolve) => {
+              releaseOld = resolve
+            })
+          }
+          return { data: newRaw }
+        },
+      },
+    })
+
+    const seed = currentOutput("current-a", "Recall raceOldNeedle()")
+    await instance.hooks["experimental.chat.messages.transform"]!({}, seed.output as any)
+    expect(injected(seed.current)[0]?.text).toContain("raceOldNeedle()")
+
+    const raced = currentOutput("current-b", "Recall raceOldNeedle()")
+    const pending = instance.hooks["experimental.chat.messages.transform"]!({}, raced.output as any)
+    await started
+    await instance.hooks.event!({
+      event: {
+        type: "message.part.updated",
+        properties: { part: textPart("part-1", "history", "h1", "raceNewNeedle() evidence") },
+      } as any,
+    })
+    releaseOld({ data: oldRaw[0] })
+    await pending
+
+    expect(injected(raced.current)).toHaveLength(0)
+
+    const after = currentOutput("current-c", "Recall raceNewNeedle()")
+    await instance.hooks["experimental.chat.messages.transform"]!({}, after.output as any)
+    expect(instance.calls.messages.filter((id) => id === "history").length).toBeGreaterThanOrEqual(2)
+    expect(injected(after.current)[0]?.text).toContain("raceNewNeedle()")
+  })
+
+  test("stale unverified seed cannot create a surviving bridge", async () => {
+    const file = await indexFile()
+    const primary = session("primary", "project-A", "/repo/main", 20)
+    const target = session("target", "project-A", "/repo/main", 10)
+
+    const first = await plugin({
+      file,
+      sessions: [primary, target],
+      messages: {
+        primary: [
+          message(
+            "p1",
+            "primary",
+            "assistant",
+            [textPart("pp", "primary", "p1", "bridgeQNeedle() via SharedBridgeEntity()")],
+            1,
+          ),
+        ],
+        target: [
+          message(
+            "t1",
+            "target",
+            "assistant",
+            [textPart("tp", "target", "t1", "SharedBridgeEntity() target-only evidence")],
+            1,
+          ),
+        ],
+      },
+    })
+    const warm = currentOutput("warm-current", "Recall bridgeQNeedle()")
+    await first.hooks["experimental.chat.messages.transform"]!({}, warm.output as any)
+    expect(injected(warm.current)[0]?.text).toContain("bridgeQNeedle()")
+
+    const second = await plugin({
+      file,
+      sessions: [primary, target],
+      messages: {
+        primary: [
+          message("p1", "primary", "assistant", [textPart("pp", "primary", "p1", "primary content replaced")], 1),
+        ],
+        target: [
+          message(
+            "t1",
+            "target",
+            "assistant",
+            [textPart("tp", "target", "t1", "SharedBridgeEntity() target-only evidence")],
+            1,
+          ),
+        ],
+      },
+    })
+    const query = currentOutput("current", "Recall bridgeQNeedle()")
+    await second.hooks["experimental.chat.messages.transform"]!({}, query.output as any)
+
+    expect(injected(query.current)).toHaveLength(0)
+    expect(second.calls.message.some((call) => call.sessionID === "target")).toBe(false)
+  })
+
+  test("verified primary evidence still enables a valid bounded bridge", async () => {
+    const primary = session("primary", "project-A", "/repo/main", 20)
+    const target = session("target", "project-A", "/repo/main", 10)
+    const instance = await plugin({
+      sessions: [primary, target],
+      messages: {
+        primary: [
+          message(
+            "p1",
+            "primary",
+            "assistant",
+            [textPart("pp", "primary", "p1", "verifiedBridgeQ() through VerifiedBridgeEntity()")],
+            1,
+          ),
+        ],
+        target: [
+          message(
+            "t1",
+            "target",
+            "assistant",
+            [textPart("tp", "target", "t1", "VerifiedBridgeEntity() downstream verified evidence")],
+            1,
+          ),
+        ],
+      },
+    })
+
+    const query = currentOutput("current", "Recall verifiedBridgeQ()")
+    await instance.hooks["experimental.chat.messages.transform"]!({}, query.output as any)
+    const text = injected(query.current)[0]?.text ?? ""
+    expect(text).toContain("verifiedBridgeQ()")
+    expect(text).toContain("downstream verified evidence")
+  })
+
   test("independent plugin instance verifies selected stale evidence against raw Kilo transcript", async () => {
     const file = await indexFile()
     const historical = session("history", "project-A", "/repo/main", 10)
@@ -656,7 +826,8 @@ describe("plugin behavior", () => {
     })
     const staleQuery = currentOutput("current-b", "Recall crossProcessOldNeedle()")
     await second.hooks["experimental.chat.messages.transform"]!({}, staleQuery.output as any)
-    expect(second.calls.messages).toContain("history")
+    expect(second.calls.messages).toEqual([])
+    expect(second.calls.message).toContainEqual({ sessionID: "history", messageID: "h1" })
     expect(injected(staleQuery.current)).toHaveLength(0)
   })
 
@@ -687,9 +858,10 @@ describe("plugin behavior", () => {
     })
     const two = currentOutput("current-b", "Recall persistentNeedle()")
     await second.hooks["experimental.chat.messages.transform"]!({}, two.output as any)
-    // The persistent index avoids broad re-ingestion, but the bounded selected
-    // session is still verified against raw Kilo before injection.
-    expect(second.calls.messages).toEqual(["history"])
+    // The persistent index avoids broad re-ingestion; final verification uses
+    // the public single-message API for only selected provenance.
+    expect(second.calls.messages).toEqual([])
+    expect(second.calls.message).toContainEqual({ sessionID: "history", messageID: "h1" })
     expect(injected(two.current)[0]?.text).toContain("persistentNeedle()")
   })
 })
