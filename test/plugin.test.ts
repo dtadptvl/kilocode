@@ -52,7 +52,20 @@ async function plugin(input: {
   timeoutMs?: number
   file?: string
 }) {
-  const calls = { list: 0, messages: [] as string[], listParams: undefined as any }
+  const calls = {
+    list: 0,
+    messages: [] as string[],
+    message: [] as Array<{ sessionID: string; messageID: string }>,
+    listParams: undefined as any,
+  }
+
+  const source = async (sessionID: string) => {
+    const value = input.messages[sessionID]
+    if (typeof value === "function") return value()
+    if (value instanceof Error) throw value
+    return { data: value ?? [] }
+  }
+
   const client = {
     experimental: {
       session: {
@@ -67,10 +80,15 @@ async function plugin(input: {
     session: {
       messages: async ({ path: requestPath }: any) => {
         calls.messages.push(requestPath.id)
-        const value = input.messages[requestPath.id]
-        if (typeof value === "function") return value()
-        if (value instanceof Error) throw value
-        return { data: value ?? [] }
+        return source(requestPath.id)
+      },
+      message: async ({ path: requestPath }: any) => {
+        calls.message.push({ sessionID: requestPath.id, messageID: requestPath.messageID })
+        const response = await source(requestPath.id)
+        if (response?.error) return response
+        const found = (response?.data ?? []).find((item: any) => item.info?.id === requestPath.messageID)
+        if (!found) return { error: { name: "NotFound" } }
+        return { data: found }
       },
     },
   }
