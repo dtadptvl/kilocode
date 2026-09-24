@@ -4,6 +4,7 @@ import os from "node:os"
 import path from "node:path"
 import { MAX_INGEST_PER_TURN } from "../src/core"
 import { createZeroMem } from "../src/index"
+import { PersistentIndex } from "../src/store"
 
 const temps: string[] = []
 afterEach(async () => {
@@ -56,6 +57,7 @@ async function plugin(input: {
     list: 0,
     messages: [] as string[],
     message: [] as Array<{ sessionID: string; messageID: string }>,
+    messageResolved: [] as Array<{ sessionID: string; messageID: string; text: string }>,
     listParams: undefined as any,
   }
 
@@ -88,6 +90,14 @@ async function plugin(input: {
         if (response?.error) return response
         const found = (response?.data ?? []).find((item: any) => item.info?.id === requestPath.messageID)
         if (!found) return { error: { name: "NotFound" } }
+        calls.messageResolved.push({
+          sessionID: requestPath.id,
+          messageID: requestPath.messageID,
+          text: (found.parts ?? [])
+            .filter((part: any) => part.type === "text")
+            .map((part: any) => String(part.text ?? ""))
+            .join("\n"),
+        })
         return { data: found }
       },
     },
@@ -696,15 +706,93 @@ describe("plugin behavior", () => {
         properties: { part: textPart("part-1", "history", "h1", "raceNewNeedle() evidence") },
       } as any,
     })
-    releaseOld({ data: oldRaw[0] })
+    releaseOld({ data: oldRaw })
     await pending
 
+    expect(
+      instance.calls.messageResolved.some(
+        (item) =>
+          item.sessionID === "history" &&
+          item.messageID === "h1" &&
+          item.text.includes("raceOldNeedle()"),
+      ),
+    ).toBe(true)
+    // The old request completed successfully; the in-flight snapshot is rejected
+    // because the mutation event advanced its generation while it was awaiting raw Kilo.
     expect(injected(raced.current)).toHaveLength(0)
 
     const after = currentOutput("current-c", "Recall raceNewNeedle()")
     await instance.hooks["experimental.chat.messages.transform"]!({}, after.output as any)
     expect(instance.calls.messages.filter((id) => id === "history").length).toBeGreaterThanOrEqual(2)
     expect(injected(after.current)[0]?.text).toContain("raceNewNeedle()")
+  })
+
+  test("session.deleted invalidates a pre-delete in-flight raw snapshot", async () => {
+    const file = await indexFile()
+    const historical = session("history", "project-A", "/repo/main", 10)
+    const oldRaw = [
+      message(
+        "h1",
+        "history",
+        "assistant",
+        [textPart("part-1", "history", "h1", "deletedRaceNeedle() evidence")],
+        1,
+      ),
+    ]
+
+    let sourceCall = 0
+    let releaseOld!: (value: any) => void
+    let verificationStarted!: () => void
+    const started = new Promise<void>((resolve) => {
+      verificationStarted = resolve
+    })
+
+    const instance = await plugin({
+      file,
+      sessions: [historical],
+      messages: {
+        history: async () => {
+          sourceCall++
+          if (sourceCall === 1) return { data: oldRaw }
+          if (sourceCall === 2) {
+            verificationStarted()
+            return new Promise((resolve) => {
+              releaseOld = resolve
+            })
+          }
+          return { error: { name: "NotFound" } }
+        },
+      },
+    })
+
+    const warm = currentOutput("current-a", "Recall deletedRaceNeedle()")
+    await instance.hooks["experimental.chat.messages.transform"]!({}, warm.output as any)
+    expect(injected(warm.current)[0]?.text).toContain("deletedRaceNeedle()")
+
+    const raced = currentOutput("current-b", "Recall deletedRaceNeedle()")
+    const pending = instance.hooks["experimental.chat.messages.transform"]!({}, raced.output as any)
+    await started
+
+    await instance.hooks.event!({
+      event: { type: "session.deleted", properties: { info: historical } } as any,
+    })
+
+    releaseOld({ data: oldRaw })
+    await pending
+
+    expect(
+      instance.calls.messageResolved.some(
+        (item) =>
+          item.sessionID === "history" &&
+          item.messageID === "h1" &&
+          item.text.includes("deletedRaceNeedle()"),
+      ),
+    ).toBe(true)
+    expect(injected(raced.current)).toHaveLength(0)
+
+    const persisted = new PersistentIndex(file)
+    await persisted.load()
+    expect(persisted.session("history")).toBeUndefined()
   })
 
   test("stale unverified seed cannot create a surviving bridge", async () => {
